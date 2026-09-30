@@ -140,6 +140,19 @@ textarea.sin{font-family:inherit;resize:vertical}
    <option value="">Modell-Standard</option><option value="none">none</option><option value="low">low</option>
    <option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option>
   </select></label>
+  <details open><summary style="cursor:pointer;color:var(--cyan2)">Multi-Agenten-Rat</summary>
+   <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+    <div class="empty">Spezialisten beraten parallel. Nur Master-Jarvis darf Werkzeuge/PC-Aktionen ausführen.</div>
+    <label>Agentenrat<select class="sin" name="JARVIS_AGENTS_ENABLED"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Agenten-Modus<select class="sin" name="JARVIS_AGENT_MODE">
+     <option value="auto">AUTO – nur bei komplexen Aufgaben</option><option value="always">IMMER</option><option value="off">AUS</option>
+    </select></label>
+    <label>Max. Spezialisten pro Aufgabe<input type="number" min="1" max="8" class="sin" name="JARVIS_AGENT_MAX_AGENTS" value="5"></label>
+    <label>Parallel laufende Spezialisten<input type="number" min="1" max="6" class="sin" name="JARVIS_AGENT_MAX_PARALLEL" value="4"></label>
+    <label>Kostenpräferenz<select class="sin" name="JARVIS_AGENT_PREFER_FREE"><option value="1">Kostenlose Modelle bevorzugen</option><option value="0">Qualität vor Preis</option></select></label>
+    <label>Premium-Modelle<select class="sin" name="JARVIS_AGENT_ALLOW_PREMIUM"><option value="0">NICHT verwenden</option><option value="1">Erlauben</option></select></label>
+   </div>
+  </details>
   <label>Anthropic-API-Schlüssel für Claude<input type="password" class="sin mono" name="ANTHROPIC_API_KEY" placeholder="sk-ant-…" autocomplete="new-password"></label>
   <div class="empty">Claude verarbeitet Anfragen in der Cloud und nutzt dein API-Guthaben. Schlüssel bleiben auf diesem PC. Ein Claude-Chat-Abo ersetzt den API-Zugang nicht.</div>
   <label>Claude-Modell<input class="sin mono" name="CLAUDE_MODEL" placeholder="claude-sonnet-5-5"></label>
@@ -199,6 +212,8 @@ textarea.sin{font-family:inherit;resize:vertical}
       <div class="kpi"><span>Zugriff</span><b class="mono" id="acc">–</b></div>
       <div class="kpi"><span>PC-Kontrolle</span><b class="mono" id="pcs">–</b></div>
       <div class="kpi"><span>Eigene Skills</span><b class="mono" id="skl">–</b></div>
+      <div class="kpi"><span>Agentenrat</span><b class="mono" id="ags">–</b></div>
+      <div class="s mono" id="agtMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
       <div class="kpi"><span>Gedächtnis</span><b class="mono" id="mem">–</b></div>
       <div class="kpi"><span>Spracheingabe</span><b class="mono" id="vox">–</b></div>
       <div class="kpi"><span>Telegram</span><b class="mono" id="tgs">–</b></div>
@@ -328,6 +343,9 @@ async function poll(){
   $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):'Lokale KI: keine API-Gebühren';
   $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
   $('#skl').textContent=s.skills;
+  const ag=s.agents||{},last=ag.last||{},okAgents=(last.agents||[]).filter(x=>x.ok);
+  $('#ags').textContent=!ag.enabled?'AUS':String(ag.mode||'auto').toUpperCase();
+  $('#agtMsg').textContent=last.used?(okAgents.length+' Spezialisten · '+okAgents.map(x=>x.model).join(' · ')):(ag.enabled?'bereit · '+(ag.roles||[]).length+' Rollen':'');
   $('#mem').textContent=s.memory_count;$('#vox').textContent=s.voice?'WHISPER':'BROWSER';
   $('#pcs').textContent=!s.local?'SERVER':!s.pc?'AUS':s.admin?'ADMIN':'BENUTZER';
   $('#tgs').textContent=!s.telegram?'AUS':s.telegram_paired?'GEKOPPELT':'KOPPELN';
@@ -372,6 +390,9 @@ function openSetup(){const f=$('#setup form');
   f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
   f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.JARVIS_CLOUD_ENABLED.value=CFG.cloud_enabled===false?'0':'1';
   f.XKIRO_MODEL.value=CFG.xkiro_model||'openai/gpt-5.6-sol';f.XKIRO_REASONING_EFFORT.value=CFG.xkiro_reasoning||'';
+  f.JARVIS_AGENTS_ENABLED.value=CFG.agents_enabled===false?'0':'1';f.JARVIS_AGENT_MODE.value=CFG.agent_mode||'auto';
+  f.JARVIS_AGENT_MAX_AGENTS.value=CFG.agent_max_agents||5;f.JARVIS_AGENT_MAX_PARALLEL.value=CFG.agent_max_parallel||4;
+  f.JARVIS_AGENT_PREFER_FREE.value=CFG.agent_prefer_free===false?'0':'1';f.JARVIS_AGENT_ALLOW_PREMIUM.value=CFG.agent_allow_premium?'1':'0';
   f.XKIRO_API_KEY.value='';f.XKIRO_API_KEY.placeholder=CFG.xkiro_key_set?'(gesetzt – leer lassen = behalten)':'sk-xt-…';
   f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
   f.CLAUDE_DAILY_BUDGET_USD.value=CFG.claude_budget??1;
