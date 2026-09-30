@@ -190,21 +190,28 @@ def _effort(row: dict, preferred: str = "high") -> str:
     return str(levels[0]) if levels else ""
 
 
-def _prompt(spec: AgentSpec, task: str) -> list[dict]:
+def _prompt(spec: AgentSpec, task: str, peer_context: str = "") -> list[dict]:
     system = (
         f"Du bist JARVIS-{spec.name}, ein spezialisierter beratender Agent in einem Multi-Agenten-System. "
         "Du führst KEINE externen Aktionen aus und behauptest keine Ausführung. "
-        "Arbeite unabhängig von den anderen Agenten, widersprich falschen Annahmen und liefere kompakte, konkrete Hinweise. "
+        "Widersprich falschen Annahmen und liefere kompakte, konkrete Hinweise. "
         f"DEINE ROLLE: {spec.mission}\n"
         "Antworte auf Deutsch in vier kurzen Abschnitten: BEFUND, VORSCHLAG, RISIKEN, PRÜFUNG."
     )
+    user = task[:12000]
+    if peer_context:
+        user += (
+            "\n\nANDERE AGENTEN HABEN BEREITS FOLGENDES GELIEFERT:\n"
+            + peer_context[:14000]
+            + "\n\nPrüfe diese Aussagen gegeneinander. Markiere Widersprüche, unbelegte Behauptungen und den robustesten gemeinsamen Kern."
+        )
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": task[:12000]},
+        {"role": "user", "content": user},
     ]
 
 
-async def _run_one(spec: AgentSpec, task: str, candidates: list[dict]) -> dict:
+async def _run_one(spec: AgentSpec, task: str, candidates: list[dict], peer_context: str = "") -> dict:
     errors = []
     # Try a few live-catalog candidates: one inaccessible model must not kill the council.
     for row in candidates[:config.AGENT_MODEL_FALLBACKS]:
@@ -213,7 +220,7 @@ async def _run_one(spec: AgentSpec, task: str, candidates: list[dict]) -> dict:
             continue
         try:
             resp = await xkiro.call(
-                _prompt(spec, task),
+                _prompt(spec, task, peer_context),
                 tools=None,
                 max_tokens=config.AGENT_MAX_TOKENS,
                 model=model,
@@ -262,11 +269,24 @@ async def council(task: str) -> str:
 
     sem = asyncio.Semaphore(config.AGENT_MAX_PARALLEL)
 
-    async def guarded(spec, candidates):
+    async def guarded(spec, candidates, peer_context=""):
         async with sem:
-            return await _run_one(spec, task, candidates)
+            return await _run_one(spec, task, candidates, peer_context)
 
-    results = await asyncio.gather(*(guarded(spec, candidates) for spec, candidates in jobs))
+    # Round 1: independent specialists. Round 2: Critic/Auditor read their peers
+    # and explicitly cross-check contradictions before the master sees the council.
+    reviewers = {"critic", "auditor"}
+    first_jobs = [(spec, candidates) for spec, candidates in jobs if spec.key not in reviewers]
+    review_jobs = [(spec, candidates) for spec, candidates in jobs if spec.key in reviewers]
+    first_results = await asyncio.gather(*(guarded(spec, candidates) for spec, candidates in first_jobs))
+    peer_context = "\n\n".join(
+        f"{r.get('name')} ({r.get('model')}):\n{r.get('text')}"
+        for r in first_results if r.get("ok")
+    )
+    review_results = await asyncio.gather(
+        *(guarded(spec, candidates, peer_context) for spec, candidates in review_jobs)
+    ) if review_jobs else []
+    results = list(first_results) + list(review_results)
     good = [r for r in results if r.get("ok")]
     errors = len(results) - len(good)
     LAST_RUN.update(
