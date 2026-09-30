@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>J.A.R.V.I.S.</title>
+<meta name="theme-color" content="#03070d">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#03070d; --panel:rgba(8,22,36,.72); --line:rgba(56,212,255,.22); --line2:rgba(56,212,255,.5);
+  --cyan:#38d4ff; --cyan2:#9beaff; --text:#d7f4ff; --dim:#6f98ad; --warn:#ffb547; --bad:#ff5a6a; --ok:#4dffb0;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Rajdhani,system-ui,sans-serif;font-size:16px}
+body{background:
+  radial-gradient(ellipse at 50% 38%,rgba(56,212,255,.10),transparent 55%),
+  repeating-linear-gradient(0deg,rgba(56,212,255,.035) 0 1px,transparent 1px 40px),
+  repeating-linear-gradient(90deg,rgba(56,212,255,.035) 0 1px,transparent 1px 40px),var(--bg);overflow:hidden}
+.mono{font-family:"JetBrains Mono",monospace}
+button{font:inherit;color:inherit;cursor:pointer}
+/* Layout */
+#app{display:grid;grid-template-columns:320px 1fr 320px;gap:14px;height:100%;padding:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px 14px;overflow:auto;
+  backdrop-filter:blur(6px);position:relative;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.col{display:flex;flex-direction:column;gap:14px;min-height:0}
+.col>.panel{flex:1 1 auto;min-height:0}
+h2{margin:0 0 10px;font-size:13px;letter-spacing:.25em;color:var(--cyan);font-weight:700;text-transform:uppercase;display:flex;justify-content:space-between}
+h2 small{color:var(--dim);letter-spacing:.05em;font-weight:400}
+/* Center */
+#center{display:flex;flex-direction:column;min-height:0;gap:12px}
+#top{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--dim);letter-spacing:.2em}
+#top b{color:var(--cyan);font-size:20px;letter-spacing:.45em}
+#reactorWrap{display:flex;justify-content:center;align-items:center;flex:0 0 auto;position:relative}
+#reactor{width:min(34vh,300px);height:min(34vh,300px);cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none}
+#reactor .r1{transform-origin:150px 150px;animation:spin 22s linear infinite}
+#reactor .r2{transform-origin:150px 150px;animation:spin 14s linear infinite reverse}
+#reactor .r3{transform-origin:150px 150px;animation:spin 8s linear infinite}
+#reactor .core{transition:all .3s;filter:drop-shadow(0 0 18px var(--cyan))}
+.listening #reactor .core{fill:#fff;filter:drop-shadow(0 0 40px #fff)}
+.listening #reactor .r3{animation-duration:1.2s}
+.thinking #reactor .r1{animation-duration:3s}.thinking #reactor .r2{animation-duration:2s}.thinking #reactor .r3{animation-duration:1s}
+.speaking #reactor .core{animation:pulse .5s ease-in-out infinite alternate}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{from{opacity:.55}to{opacity:1}}
+#stateLbl{position:absolute;bottom:-4px;font-size:12px;letter-spacing:.4em;color:var(--cyan2)}
+#chat{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:4px 6px}
+.msg{max-width:88%;padding:9px 13px;border:1px solid var(--line);border-radius:3px;white-space:pre-wrap;line-height:1.38;font-size:16px}
+.msg.u{align-self:flex-end;background:rgba(56,212,255,.10);border-color:var(--line2)}
+.msg.j{align-self:flex-start;background:rgba(3,12,20,.8)}
+.msg.j::before{content:"JARVIS";display:block;font-size:10px;letter-spacing:.3em;color:var(--cyan);margin-bottom:3px}
+.msg.sys{align-self:center;font-size:13px;color:var(--warn);border-color:rgba(255,181,71,.35)}
+a{color:var(--cyan2)}
+.msg,.feed{overflow-wrap:anywhere}
+#bar{display:flex;gap:8px}
+#inp{flex:1;background:rgba(3,12,20,.9);border:1px solid var(--line2);color:var(--text);padding:12px 14px;font:inherit;font-size:16px;border-radius:3px;outline:none}
+#inp:focus{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
+.btn{background:rgba(56,212,255,.12);border:1px solid var(--line2);padding:0 14px;border-radius:3px;letter-spacing:.12em;font-weight:600;min-height:44px}
+.btn:hover{background:rgba(56,212,255,.22)}
+.btn.on{background:var(--cyan);color:#021018}
+.btn.sm{min-height:28px;padding:0 8px;font-size:13px}
+.btn.ok{border-color:var(--ok);color:var(--ok)}.btn.bad{border-color:var(--bad);color:var(--bad)}
+#tools{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;font-size:13px}
+/* Items */
+.item{border-left:2px solid var(--line2);padding:6px 0 8px 10px;margin-bottom:10px}
+.item .t{font-weight:700;font-size:16px}
+.item .s{color:var(--dim);font-size:13px}
+.prog{height:5px;background:rgba(56,212,255,.12);margin:6px 0;position:relative}
+.prog i{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,var(--cyan),var(--cyan2));box-shadow:0 0 10px var(--cyan)}
+.tag{font-size:11px;letter-spacing:.15em;padding:1px 6px;border:1px solid currentColor;border-radius:2px;margin-left:6px;vertical-align:2px}
+.st-active{color:var(--ok)}.st-paused{color:var(--warn)}.st-done{color:var(--cyan)}.st-failed{color:var(--bad)}
+.appr{border:1px solid var(--warn);background:rgba(255,181,71,.07);padding:10px;margin-bottom:10px;border-radius:3px}
+.appr .q{white-space:pre-wrap;margin:4px 0 8px}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.feed{font-size:13px;border-bottom:1px dashed var(--line);padding:6px 0;white-space:pre-wrap}
+.feed .ts{color:var(--dim);font-size:11px}
+.kpi{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0}
+.kpi b{font-size:22px;color:var(--cyan2)}
+.empty{color:var(--dim);font-size:14px}
+.sin{display:block;width:100%;margin-top:4px;background:#051320;border:1px solid var(--line2);color:var(--text);padding:11px;font-size:16px;border-radius:3px}
+label{font-size:14px;color:var(--dim)}
+textarea.sin{font-family:inherit;resize:vertical}
+/* Login */
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:10}
+#login form{display:flex;flex-direction:column;gap:12px;width:min(340px,90vw);text-align:center}
+#login h1{letter-spacing:.5em;color:var(--cyan);font-weight:700;margin:0 0 8px}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:9;padding:16px}
+#modal .panel{width:min(760px,100%);max-height:80vh}
+#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:11;display:flex;flex-direction:column;gap:8px}
+#toast div{background:#062033;border:1px solid var(--cyan);padding:10px 16px;width:min(520px,calc(100vw - 32px));white-space:pre-wrap;box-shadow:0 0 20px rgba(56,212,255,.3)}
+/* Mobile */
+@media (max-width:980px){
+  body{overflow:auto}
+  #app{grid-template-columns:1fr;height:auto;padding:12px 16px}
+  #center{min-height:92vh;order:-1}
+  #top{font-size:11px;letter-spacing:.05em}#top b{font-size:16px;letter-spacing:.3em}
+  #model{display:none}
+  #reactor{width:200px;height:200px}
+  .col>.panel{max-height:none}
+}
+</style>
+</head>
+<body>
+<div id="login"><form onsubmit="doLogin(event)">
+  <svg viewBox="0 0 100 100" width="90" height="90" style="margin:0 auto"><circle cx="50" cy="50" r="44" fill="none" stroke="#38d4ff" stroke-width="2"/><circle cx="50" cy="50" r="16" fill="#38d4ff"/></svg>
+  <h1>J.A.R.V.I.S.</h1>
+  <input id="pw" type="password" placeholder="Zugangscode" class="mono" style="background:#051320;border:1px solid var(--line2);color:var(--text);padding:12px;font-size:16px" autofocus>
+  <button class="btn">ENTSPERREN</button>
+  <div id="loginErr" style="color:var(--bad);min-height:20px"></div>
+</form></div>
+
+<div id="setup" style="display:none;position:fixed;inset:0;z-index:12;background:var(--bg);overflow:auto;padding:24px 16px">
+ <form onsubmit="doSetup(event)" style="max-width:520px;margin:0 auto;display:flex;flex-direction:column;gap:10px">
+  <h1 style="letter-spacing:.4em;color:var(--cyan);margin:0">EINRICHTUNG</h1>
+  <div class="empty">Wird nur lokal in der .env im Jarvis-Ordner gespeichert. Leere Felder bleiben unverändert.</div>
+  <label>Dein Name<input class="sin" name="OWNER_NAME" value="Marvin"></label>
+  <label>Anrede<input class="sin" name="OWNER_TITLE" value="Sir"></label>
+  <label>Über dich / dein Business (Jarvis arbeitet damit)<textarea class="sin" name="OWNER_INFO" rows="3"></textarea></label>
+  <label>KI-Anbieter<select class="sin" name="JARVIS_PROVIDER">
+   <option value="auto">Automatisch: Claude mit Schlüssel, sonst Ollama</option>
+   <option value="claude">Claude (Anthropic API)</option>
+   <option value="ollama">Ollama (lokal)</option>
+  </select></label>
+  <label>Anthropic-API-Schlüssel für Claude<input type="password" class="sin mono" name="ANTHROPIC_API_KEY" placeholder="sk-ant-…" autocomplete="new-password"></label>
+  <div class="empty">Claude verarbeitet Anfragen in der Cloud und nutzt dein API-Guthaben. Schlüssel bleiben auf diesem PC. Ein Claude-Chat-Abo ersetzt den API-Zugang nicht.</div>
+  <label>Claude-Modell<input class="sin mono" name="CLAUDE_MODEL" placeholder="claude-sonnet-5-5"></label>
+  <label>Claude-Tagesbudget in USD (Kostenschätzung; 0 = ohne Limit)<input type="number" min="0" step="0.01" class="sin" name="CLAUDE_DAILY_BUDGET_USD" value="1"></label>
+  <label>Telegram-Bot-Token (von @BotFather → /newbot)<input class="sin mono" name="TELEGRAM_BOT_TOKEN" placeholder="123456789:ABC…" autocomplete="off"></label>
+  <details><summary style="cursor:pointer;color:var(--cyan2)">Erweitert (Modelle, Online-Server)</summary>
+   <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+    <label>Lokales KI-Modell (Ollama)<input class="sin mono" name="JARVIS_MODEL" placeholder="qwen3:8b"></label>
+    <label>Seh-Modell für Bildschirm/Fotos (optional)<input class="sin mono" name="JARVIS_VISION_MODEL" placeholder="qwen3-vl:4b"></label>
+    <label>n8n-Server-Adresse (optional)<input class="sin mono" name="N8N_BASE_URL" placeholder="https://n8n.deine-domain.de"></label>
+    <label>n8n-Geheimwort (optional)<input class="sin mono" name="N8N_SECRET" autocomplete="off"></label>
+   </div>
+  </details>
+  <button class="btn">SPEICHERN &amp; STARTEN</button>
+  <button type="button" class="btn sm" onclick="closeSetup()">ABBRECHEN</button>
+ </form>
+</div>
+
+<div id="app">
+  <div class="col">
+    <div class="panel" style="flex:0 0 auto"><h2>Freigaben <small id="apprCount"></small></h2><div id="approvals"><div class="empty">Keine offenen Freigaben.</div></div></div>
+    <div class="panel"><h2>Missionen <small>autonom</small></h2><div id="missions"></div></div>
+  </div>
+
+  <div id="center">
+    <div id="top"><span class="mono" id="clock"></span><b>J.A.R.V.I.S.</b><span class="mono" id="model"></span></div>
+    <div id="reactorWrap">
+      <svg id="reactor" viewBox="0 0 300 300" aria-label="Halten zum Sprechen">
+        <defs><radialGradient id="g"><stop offset="0" stop-color="#e8fbff"/><stop offset=".45" stop-color="#38d4ff"/><stop offset="1" stop-color="#38d4ff" stop-opacity="0"/></radialGradient></defs>
+        <circle cx="150" cy="150" r="140" fill="none" stroke="rgba(56,212,255,.15)" stroke-width="1"/>
+        <g class="r1"><circle cx="150" cy="150" r="128" fill="none" stroke="#38d4ff" stroke-width="2" stroke-dasharray="4 10 60 10" opacity=".7"/></g>
+        <g class="r2"><circle cx="150" cy="150" r="108" fill="none" stroke="#9beaff" stroke-width="6" stroke-dasharray="30 14" opacity=".45"/></g>
+        <g class="r3"><circle cx="150" cy="150" r="86" fill="none" stroke="#38d4ff" stroke-width="2" stroke-dasharray="120 40 20 40" /></g>
+        <circle cx="150" cy="150" r="66" fill="rgba(56,212,255,.06)" stroke="rgba(56,212,255,.5)"/>
+        <circle class="core" cx="150" cy="150" r="42" fill="url(#g)"/>
+      </svg>
+      <div id="stateLbl">BEREIT</div>
+    </div>
+    <div id="tools">
+      <button class="btn sm" id="wakeBtn" title="Hört dauerhaft auf 'Jarvis' (Chrome/Edge)">WAKE-WORD „JARVIS“</button>
+      <button class="btn sm on" id="speakBtn">STIMME AN</button>
+      <button class="btn sm" onclick="resetChat()">NEUES GESPRÄCH</button>
+    </div>
+    <div id="chat"></div>
+    <form id="bar" onsubmit="sendText(event)">
+      <input id="inp" placeholder="Befehl eingeben … oder Reaktor / Leertaste halten zum Sprechen" autocomplete="off">
+      <button class="btn">SENDEN</button>
+    </form>
+  </div>
+
+  <div class="col">
+    <div class="panel" style="flex:0 0 auto"><h2>Systeme <small><a href="#" onclick="openSetup();return false">EINSTELLUNGEN</a></small></h2>
+      <div class="kpi"><span id="providerName">KI</span><b class="mono" id="ki">–</b></div>
+      <div class="s mono" id="kiMsg" style="color:var(--dim);font-size:12px"></div>
+      <button class="btn sm" type="button" onclick="checkAI()">KI-VERBINDUNG TESTEN</button>
+      <div class="s mono" id="costMsg" style="font-size:12px"></div>
+      <div class="kpi"><span>Zugriff</span><b class="mono" id="acc">–</b></div>
+      <div class="kpi"><span>PC-Kontrolle</span><b class="mono" id="pcs">–</b></div>
+      <div class="kpi"><span>Eigene Skills</span><b class="mono" id="skl">–</b></div>
+      <div class="kpi"><span>Gedächtnis</span><b class="mono" id="mem">–</b></div>
+      <div class="kpi"><span>Spracheingabe</span><b class="mono" id="vox">–</b></div>
+      <div class="kpi"><span>Telegram</span><b class="mono" id="tgs">–</b></div>
+      <div id="pairBox"></div>
+      <button class="btn bad" id="stopBtn" style="width:100%;margin-top:8px" onclick="toggleStop()">NOTAUS</button>
+    </div>
+    <div class="panel"><h2>Meldungen</h2><div id="feed"><div class="empty">Noch ruhig.</div></div></div>
+    <div class="panel"><h2>Aktionen</h2><div id="actions"></div></div>
+    <div class="panel" style="flex:0 0 auto"><h2>Zeitplan</h2><div id="schedules"></div></div>
+  </div>
+</div>
+
+<div id="modal" onclick="if(event.target===this)this.style.display='none'"><div class="panel"><h2 id="mTitle">Log</h2><div id="mBody" class="mono" style="font-size:13px"></div></div></div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let TOKEN = null; try { TOKEN = localStorage.getItem('jarvis_token'); } catch (e) {}
+let speakOn = true; try { speakOn = localStorage.getItem('jarvis_speak') !== '0'; } catch (e) {}
+let feedSince = 0, busy = false, serverVoice = false;
+
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function linkify(s){return esc(s).replace(/(https?:\/\/[^\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')}
+function setState(s,label){document.body.classList.remove('listening','thinking','speaking');if(s)document.body.classList.add(s);$('#stateLbl').textContent=label||'BEREIT'}
+function toast(t){const d=document.createElement('div');d.textContent=t;$('#toast').appendChild(d);setTimeout(()=>d.remove(),7000)}
+function addMsg(role,text){const d=document.createElement('div');d.className='msg '+role;d.innerHTML=linkify(text);$('#chat').appendChild(d);$('#chat').scrollTop=1e9}
+
+async function api(path,opts={}){
+  const r=await fetch(path,{...opts,headers:{...(opts.body instanceof FormData?{}:{'Content-Type':'application/json'}),'Authorization':'Bearer '+TOKEN,'X-Jarvis':'1',...(opts.headers||{})}});
+  if(r.status===401){logout();throw new Error('unauthorized')}
+  const j=await r.json();if(!r.ok)throw new Error(j.error||'Anfrage fehlgeschlagen ('+r.status+')');return j;
+}
+async function doLogin(e){e.preventDefault();
+ try{
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('#pw').value})});
+  if(!r.ok){$('#loginErr').textContent='Zugang verweigert.';return}
+  const j=await r.json();TOKEN=j.token;try{localStorage.setItem('jarvis_token',TOKEN)}catch(e){}CFG=await api('/api/config');started=true;start(j.title)
+ }catch(err){$('#loginErr').textContent='Verbindung fehlgeschlagen: '+err.message}}
+function logout(){TOKEN=null;try{localStorage.removeItem('jarvis_token')}catch(e){}$('#login').style.display='flex'}
+
+async function start(title){
+  $('#login').style.display='none';
+  try{const h=await api('/api/history');$('#chat').innerHTML='';for(const m of h)addMsg(m.role==='user'?'u':'j',m.content)}catch(e){started=false;return}
+  if(!$('#chat').children.length)addMsg('j',`Guten Tag, ${title||'Sir'}. Das Dashboard ist geöffnet. Den KI-Status sehen Sie rechts unter Systeme.`);
+  poll();if(!pollTimer)pollTimer=setInterval(poll,4000);
+}
+
+/* ---------- Senden & Antworten ---------- */
+async function handleReply(j){
+  if(j.heard)addMsg('u',j.heard);
+  if(j.error){addMsg('sys',j.error);return}
+  addMsg('j',j.reply||'');
+  if(!speakOn)return;
+  if(j.audio){setState('speaking','SPRICHT');const a=new Audio('data:audio/mpeg;base64,'+j.audio);a.onended=()=>setState();await a.play().catch(()=>setState())}
+  else if('speechSynthesis' in window && j.reply){const u=new SpeechSynthesisUtterance(j.reply.replace(/https?:\/\/\S+/g,'Link').replace(/[*#_`]/g,''));u.lang='de-DE';const v=pickVoice();if(v)u.voice=v;setState('speaking','SPRICHT');u.onend=()=>setState();speechSynthesis.speak(u)}
+}
+function pickVoice(){const vs=speechSynthesis.getVoices().filter(v=>v.lang.startsWith('de'));
+  return vs.find(v=>/Conrad|Killian|Florian/i.test(v.name)&&/Natural|Online/i.test(v.name))||vs.find(v=>/Conrad|Stefan|Killian|Florian/i.test(v.name))||vs.find(v=>/Natural|Online/i.test(v.name))||vs[0]}
+if('speechSynthesis' in window)speechSynthesis.onvoiceschanged=()=>{};
+async function ask(text){
+  if(!text||busy)return;busy=true;addMsg('u',text);setState('thinking','ARBEITET');
+  try{await handleReply(await api('/api/chat',{method:'POST',body:JSON.stringify({text,speak:speakOn})}))}
+  catch(e){addMsg('sys','Verbindung fehlgeschlagen: '+e.message)}
+  finally{busy=false;if(!document.body.classList.contains('speaking'))setState()}
+}
+function sendText(e){e.preventDefault();const t=$('#inp').value.trim();$('#inp').value='';ask(t)}
+async function resetChat(){await api('/api/reset',{method:'POST'});$('#chat').innerHTML='';addMsg('j','Neues Gespräch. Gedächtnis und Missionen bleiben erhalten.')}
+
+/* ---------- Push-to-talk ---------- */
+let rec=null,chunks=[],browserRec=null;
+async function startTalk(){
+  if(busy||rec)return;
+  if(serverVoice && navigator.mediaDevices){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const type=MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/mp4';
+      rec=new MediaRecorder(stream,{mimeType:type});chunks=[];
+      rec.ondataavailable=e=>chunks.push(e.data);
+      rec.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());const blob=new Blob(chunks,{type});rec=null;
+        if(blob.size<3000){setState();return}
+        busy=true;setState('thinking','ARBEITET');const fd=new FormData();fd.append('audio',blob,type==='audio/webm'?'a.webm':'a.mp4');
+        try{await handleReply(await api('/api/voice',{method:'POST',body:fd}))}catch(e){addMsg('sys',e.message)}
+        finally{busy=false;if(!document.body.classList.contains('speaking'))setState()}};
+      rec.start();setState('listening','HÖRT ZU');return;
+    }catch(e){toast('Mikrofon nicht verfügbar: '+e.message);return}
+  }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){toast('Spracheingabe braucht faster-whisper oder Chrome/Edge.');return}
+  browserRec=new SR();browserRec.lang='de-DE';browserRec.interimResults=false;
+  browserRec.onresult=e=>{const t=e.results[0][0].transcript;browserRec=null;setState();ask(t)};
+  browserRec.onend=()=>{if(browserRec){browserRec=null;setState()}};
+  browserRec.start();setState('listening','HÖRT ZU');rec=null;
+}
+function stopTalk(){if(rec&&rec.state==='recording')rec.stop();else if(browserRec)browserRec.stop()}
+const R=$('#reactor');
+R.addEventListener('pointerdown',e=>{e.preventDefault();startTalk()});
+['pointerup','pointerleave','pointercancel'].forEach(ev=>R.addEventListener(ev,stopTalk));
+function isEditing(){return !!document.activeElement?.closest('input,textarea,select,[contenteditable="true"]')}
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!isEditing()&&!e.repeat){e.preventDefault();startTalk()}});
+document.addEventListener('keyup',e=>{if(e.code==='Space'&&!isEditing())stopTalk()});
+
+/* ---------- Wake-Word (Browser-Spracherkennung) ---------- */
+let wake=null,wakeOn=false;
+$('#wakeBtn').onclick=()=>{wakeOn=!wakeOn;$('#wakeBtn').classList.toggle('on',wakeOn);wakeOn?startWake():wake&&wake.stop()};
+function startWake(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){toast('Wake-Word braucht Chrome oder Edge.');wakeOn=false;$('#wakeBtn').classList.remove('on');return}
+  wake=new SR();wake.lang='de-DE';wake.continuous=true;wake.interimResults=false;
+  wake.onresult=e=>{const t=e.results[e.results.length-1][0].transcript.trim();
+    const m=t.match(/(jarvis|javis|dschawis|tschawis)[,.!\s]*(.*)$/i);
+    if(m&&!busy){const cmd=m[2].trim();if(cmd)ask(cmd);else{toast('Ja, Sir?');wake.stop();setTimeout(startTalk,300)}}};
+  wake.onend=()=>{if(wakeOn)setTimeout(()=>{try{wake.start()}catch(e){}},400)};
+  try{wake.start()}catch(e){}
+}
+$('#speakBtn').onclick=()=>{speakOn=!speakOn;try{localStorage.setItem('jarvis_speak',speakOn?'1':'0')}catch(e){}paintSpeak()};
+function paintSpeak(){$('#speakBtn').classList.toggle('on',speakOn);$('#speakBtn').textContent=speakOn?'STIMME AN':'STIMME AUS'}
+paintSpeak();
+
+/* ---------- Status-Polling ---------- */
+async function poll(){
+  let s;try{s=await api('/api/state?since='+feedSince)}catch(e){return}
+  serverVoice=s.voice;$('#model').textContent=s.model+(s.vision?' + '+s.vision:'');
+  const o=s.llm||s.ollama||{};$('#providerName').textContent=s.provider==='claude'?'Claude':'Lokale KI';
+  $('#ki').textContent=!o.ok?'OFFLINE':o.model_ok?'BEREIT':'MODELL FEHLT';
+  $('#ki').style.color=o.ok&&o.model_ok?'var(--ok)':'var(--bad)';
+  $('#kiMsg').textContent=o.ok&&o.model_ok?s.model:(o.msg||'');
+  $('#costMsg').textContent=s.provider==='claude'?`Heute ca. $${Number(s.usage.cost_usd).toFixed(3)} · Tageslimit ${s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit'}`:'Lokale KI: keine API-Gebühren';
+  $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
+  $('#skl').textContent=s.skills;
+  $('#mem').textContent=s.memory_count;$('#vox').textContent=s.voice?'WHISPER':'BROWSER';
+  $('#pcs').textContent=!s.local?'SERVER':!s.pc?'AUS':s.admin?'ADMIN':'BENUTZER';
+  $('#tgs').textContent=!s.telegram?'AUS':s.telegram_paired?'GEKOPPELT':'KOPPELN';
+  $('#pairBox').innerHTML=s.telegram&&!s.telegram_paired&&s.pair_code?`<div class="appr"><b>Telegram koppeln</b><div class="q">Schick deinem Bot${s.bot_name?' <a href="https://t.me/'+esc(s.bot_name)+'" target="_blank" rel="noopener">@'+esc(s.bot_name)+'</a>':''}:\n<span class="mono" style="font-size:20px;color:var(--cyan2)">/koppeln ${esc(s.pair_code)}</span></div></div>`:'';
+  notausOn=!!s.notaus;$('#stopBtn').textContent=notausOn?'NOTAUS AKTIV – AUFHEBEN':'NOTAUS';$('#stopBtn').classList.toggle('on',notausOn);
+  $('#missions').innerHTML=s.missions.length?s.missions.map(m=>{
+    const p=m.target_value?Math.min(100,100*(m.current_value||0)/m.target_value):null;
+    return `<div class="item"><div class="t">#${m.id} ${esc(m.title)}<span class="tag st-${m.status}">${m.status.toUpperCase()}</span></div>
+      ${p!==null?`<div class="prog"><i style="width:${p}%"></i></div><div class="s mono">${(m.current_value||0)} / ${m.target_value} ${esc(m.unit||'')}</div>`:''}
+      <div class="s">→ ${esc(m.next_step||'plant …')}</div><div class="s mono">Zyklen ${m.cycles} · nächster Lauf ${m.next_run_fmt}</div>
+      <div class="row" style="margin-top:6px"><button class="btn sm" onclick="showLog(${m.id},'${esc(m.title).replace(/'/g,'')}')">LOG</button>
+      ${m.status==='active'?`<button class="btn sm" onclick="mAct(${m.id},'pause')">PAUSE</button>`:''}
+      ${m.status==='paused'?`<button class="btn sm" onclick="mAct(${m.id},'resume')">WEITER</button>`:''}
+      ${['active','paused'].includes(m.status)?`<button class="btn sm bad" onclick="if(confirm('Mission stoppen?'))mAct(${m.id},'stop')">STOPP</button>`:''}</div></div>`}).join('')
+    :'<div class="empty">Keine Missionen. Sag z.B.: „Jarvis, verdiene 500 € für mich.“</div>';
+  $('#apprCount').textContent=s.approvals.length?s.approvals.length+' offen':'';
+  $('#approvals').innerHTML=s.approvals.length?s.approvals.map(a=>`<div class="appr"><b>#${a.id} · ${a.kind.toUpperCase()}</b>${a.mission_id?` · Mission #${a.mission_id}`:''}
+    <div class="q">${linkify(a.question)}${a.details?'\n\n'+linkify(a.details):''}</div>
+    <div class="row"><button class="btn sm ok" onclick="appr(${a.id},true)">FREIGEBEN</button><button class="btn sm bad" onclick="appr(${a.id},false)">ABLEHNEN</button></div></div>`).join('')
+    :'<div class="empty">Keine offenen Freigaben.</div>';
+  $('#schedules').innerHTML=s.schedules.length?s.schedules.map(x=>`<div class="feed">${esc(x.description)}<div class="ts mono">${x.daily_time?'täglich '+x.daily_time:x.interval_min?'alle '+x.interval_min+' min':'einmalig'} · ${x.next_run_fmt}</div></div>`).join(''):'<div class="empty">Nichts geplant.</div>';
+  $('#actions').innerHTML=s.actions.length?s.actions.map(a=>`<div class="feed"><span class="ts mono">${a.ts_fmt} · ${esc(a.kind)}</span><br>${linkify(a.summary)}</div>`).join(''):'<div class="empty">Noch keine Aktionen.</div>';
+  if(s.feed.length){
+    const first=feedSince===0;if(first)$('#feed').innerHTML='';
+    for(const f of s.feed){feedSince=Math.max(feedSince,f.id);const d=document.createElement('div');d.className='feed';
+      d.innerHTML=`<span class="ts mono">${new Date(f.ts*1000).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</span><br>${linkify(f.text)}`;
+      $('#feed').prepend(d);if(!first)toast(f.text.slice(0,200))}
+  }
+}
+async function appr(id,ok){const note=ok?'':(prompt('Grund / Hinweis für Jarvis (optional):')||'');const r=await api('/api/approval/'+id,{method:'POST',body:JSON.stringify({approve:ok,note})});toast(r.result);poll()}
+async function mAct(id,a){await api(`/api/mission/${id}/${a}`,{method:'POST'});poll()}
+async function showLog(id,title){const l=await api(`/api/mission/${id}/log`);$('#mTitle').textContent='Mission #'+id+' · '+title;
+  $('#mBody').innerHTML=l.map(x=>`<div class="feed"><span class="ts">${x.ts}</span><br>${linkify(x.entry)}</div>`).join('');$('#modal').style.display='flex'}
+
+setInterval(()=>{$('#clock').textContent=new Date().toLocaleString('de-DE',{weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+let notausOn=false,started=false,CFG={},pollTimer=null;
+async function toggleStop(){const on=!notausOn;if(!on&&!confirm('NOTAUS aufheben?'))return;
+  await api('/api/notaus',{method:'POST',body:JSON.stringify({on})});toast(on?'NOTAUS: alles gestoppt, Missionen pausiert.':'NOTAUS aufgehoben.');poll()}
+function openSetup(){const f=$('#setup form');
+  f.OWNER_NAME.value=CFG.name||'Marvin';f.OWNER_TITLE.value=CFG.title||'Sir';f.OWNER_INFO.value=CFG.info||'';
+  f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
+  f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
+  f.CLAUDE_DAILY_BUDGET_USD.value=CFG.claude_budget??1;
+  f.ANTHROPIC_API_KEY.value='';f.ANTHROPIC_API_KEY.placeholder=CFG.claude_key_set?'(gesetzt – leer lassen = behalten)':'sk-ant-…';
+  f.TELEGRAM_BOT_TOKEN.placeholder=CFG.telegram?'(gesetzt – leer lassen = behalten)':'123456789:ABC…';
+  $('#login').style.display='none';$('#setup').style.display='block'}
+function closeSetup(){$('#setup').style.display='none';if(CFG.needs_setup&&!started)boot()}
+async function checkAI(){toast('KI-Verbindung wird getestet …');
+ try{const j=await api('/api/check',{method:'POST'});toast(j.provider+': '+j.reply);poll()}
+ catch(e){toast(e.message)}}
+async function boot(){
+  let c;try{c=await (await fetch('/api/config')).json()}catch(e){setTimeout(boot,1500);return}
+  CFG=c;
+  if(c.needs_setup&&c.local){openSetup();return}
+  if(started)return;
+  if(!c.needs_login){TOKEN='local';started=true;start(c.title);return}
+  if(TOKEN){started=true;start(c.title)}
+}
+async function doSetup(e){e.preventDefault();const body=Object.fromEntries(new FormData(e.target));
+  const saveButton=e.target.querySelector('button[type="submit"],button:not([type])');saveButton.disabled=true;
+  try{
+  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1'},body:JSON.stringify(body)});
+  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));await boot();poll()}
+  else{let m='Speichern fehlgeschlagen';try{m=(await r.json()).error||m}catch(_){}toast(m)}
+  }catch(err){toast('Speichern fehlgeschlagen: '+err.message)}finally{saveButton.disabled=false}}
+boot();
+</script>
+</body>
+</html>
