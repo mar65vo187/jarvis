@@ -58,7 +58,10 @@ werden als Beratung in den Systemkontext des Masters gegeben; Seiteneffekte blei
 zentral beim Master und seinen Freigaberegeln.
 
 Wichtige Schalter stehen in `.env.example` und im Dashboard. Standard: maximal
-5 Spezialisten, 4 parallel, kostenlose Modelle bevorzugt, Premium aus.
+5 Spezialisten, 4 parallel, kostenlose Modelle bevorzugt, Premium aus. Autonome
+Missionen holen den Rat im ersten Zyklus und anschließend standardmäßig alle vier
+Zyklen erneut hinzu, damit Daueraufgaben nicht bei jedem Lauf unnötig viele Modelle
+aufrufen.
 
 ## Anbieter
 
