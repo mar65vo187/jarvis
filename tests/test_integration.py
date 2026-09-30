@@ -10,7 +10,7 @@ from unittest.mock import patch
 # Reuse the existing test bootstrap: no real user data or credentials are touched.
 import test_jarvis
 import httpx
-from jarvis import brain, claude, config, db, guard, main, web
+from jarvis import brain, claude, config, db, guard, main, web, xkiro
 
 REAL_CLIENT = httpx.AsyncClient
 
@@ -22,7 +22,8 @@ class Integration(unittest.TestCase):
         self.env_file = config.ENV_FILE
         config.ENV_FILE = Path(self.tmp.name) / '.env'
         os.environ['JARVIS_PROVIDER'] = 'auto'
-        for key in ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_DAILY_BUDGET_USD', 'CLAUDE_MODEL', 'CLAUDE_PRICE_IN', 'CLAUDE_PRICE_OUT'):
+        for key in ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_DAILY_BUDGET_USD', 'CLAUDE_MODEL', 'CLAUDE_PRICE_IN', 'CLAUDE_PRICE_OUT',
+                    'XKIRO_API_KEY', 'XKIRO_MODEL', 'XKIRO_REASONING_EFFORT', 'JARVIS_CLOUD_ENABLED'):
             os.environ.pop(key, None)
         config.reload()
         db.ex('DELETE FROM usage')
@@ -31,10 +32,12 @@ class Integration(unittest.TestCase):
         guard.set_stop(False)
         db.set_setting('setup_done', '0')
         self.status = dict(config.CLAUDE_STATUS)
+        self.xkiro_status = dict(config.XKIRO_STATUS)
         self.ollama = dict(config.OLLAMA_STATUS)
         self.hooks = list(web.NOTIFY_HOOKS)
         web.NOTIFY_HOOKS[:] = [web._notify_hook]
         claude._lock = asyncio.Lock()
+        xkiro._lock = asyncio.Lock()
         brain._ollama_lock = asyncio.Lock()
         brain._locks.clear()
 
@@ -46,6 +49,8 @@ class Integration(unittest.TestCase):
         config.reload()
         config.CLAUDE_STATUS.clear()
         config.CLAUDE_STATUS.update(self.status)
+        config.XKIRO_STATUS.clear()
+        config.XKIRO_STATUS.update(self.xkiro_status)
         config.OLLAMA_STATUS.clear()
         config.OLLAMA_STATUS.update(self.ollama)
         self.tmp.cleanup()
@@ -56,6 +61,9 @@ class Integration(unittest.TestCase):
 
     def fake_api(self, handler):
         return patch.object(claude.httpx, 'AsyncClient', side_effect=lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handler), **kw))
+
+    def fake_xkiro_api(self, handler):
+        return patch.object(xkiro.httpx, 'AsyncClient', side_effect=lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handler), **kw))
 
     def client(self, host='127.0.0.1'):
         return REAL_CLIENT(transport=httpx.ASGITransport(app=web.app, client=('127.0.0.1', 1234)),
@@ -237,6 +245,63 @@ class Integration(unittest.TestCase):
         _, converted = claude.messages_payload(fitted)
         self.assertEqual(converted[-1]['content'][0]['tool_use_id'], 'x')
 
+
+
+    def test_xkiro_openai_protocol_and_cloud_lock(self):
+        os.environ.update(JARVIS_PROVIDER='xkiro', JARVIS_CLOUD_ENABLED='1',
+                          XKIRO_API_KEY='test-xkiro-key', XKIRO_MODEL='openai/gpt-5.6-sol')
+        config.reload()
+        seen = {'calls': 0}
+
+        def respond(req):
+            if req.url.path.endswith('/usage'):
+                self.assertEqual(req.headers.get('authorization'), 'Bearer test-xkiro-key')
+                return httpx.Response(200, json={'free_tokens': {'remaining': 123},
+                                                 'wallet': {'balance_usd': '0.000000'}})
+            if req.url.path.endswith('/models'):
+                return httpx.Response(200, json={'data': [{'id': 'openai/gpt-5.6-sol'},
+                                                           {'id': 'z-ai/glm-5.2'}]})
+            self.assertTrue(req.url.path.endswith('/chat/completions'))
+            payload = json.loads(req.content)
+            self.assertEqual(payload['model'], 'openai/gpt-5.6-sol')
+            self.assertTrue(payload.get('tools'))
+            seen['calls'] += 1
+            if seen['calls'] == 1:
+                return httpx.Response(200, json={'choices': [{'finish_reason': 'tool_calls', 'message': {
+                    'role': 'assistant', 'content': None, 'tool_calls': [{
+                        'id': 'call_1', 'type': 'function',
+                        'function': {'name': 'list_dir', 'arguments': '{}'}
+                    }]}}], 'usage': {'prompt_tokens': 10, 'completion_tokens': 4}})
+            self.assertEqual(payload['messages'][-1]['role'], 'tool')
+            self.assertEqual(payload['messages'][-1]['tool_call_id'], 'call_1')
+            return httpx.Response(200, json={'choices': [{'finish_reason': 'stop',
+                'message': {'role': 'assistant', 'content': 'xKiro bereit.'}}],
+                'usage': {'prompt_tokens': 12, 'completion_tokens': 3}})
+
+        with self.fake_xkiro_api(respond):
+            status = asyncio.run(xkiro.check())
+            self.assertTrue(status['ok'])
+            self.assertTrue(status['model_ok'])
+            answer = asyncio.run(brain.think(
+                [{'role': 'user', 'content': 'Liste Dateien.'}], {'channel': 'hud'}, max_steps=3))
+        self.assertEqual(answer, 'xKiro bereit.')
+        self.assertEqual(seen['calls'], 2)
+
+        os.environ['JARVIS_CLOUD_ENABLED'] = '0'
+        config.reload()
+        self.assertEqual(config.active_provider(), 'ollama')
+
+    def test_auto_prefers_xkiro_then_claude_then_local(self):
+        os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
+                          XKIRO_API_KEY='x', ANTHROPIC_API_KEY='a')
+        config.reload()
+        self.assertEqual(config.active_provider(), 'xkiro')
+        os.environ.pop('XKIRO_API_KEY')
+        config.reload()
+        self.assertEqual(config.active_provider(), 'claude')
+        os.environ.pop('ANTHROPIC_API_KEY')
+        config.reload()
+        self.assertEqual(config.active_provider(), 'ollama')
 
 if __name__ == '__main__':
     unittest.main()
