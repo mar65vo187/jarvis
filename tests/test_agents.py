@@ -91,6 +91,7 @@ class AgentCouncil(unittest.TestCase):
         self.assertEqual(len({c["model"] for c in calls}), 5)
         self.assertTrue(any(c["web_search"] for c in calls))
         self.assertTrue(all(c["tools"] is None for c in calls))
+        self.assertTrue(any("ANDERE AGENTEN HABEN BEREITS" in c["messages"][-1]["content"] for c in calls))
         self.assertTrue(agents.LAST_RUN["used"])
 
     def test_master_receives_council_as_context_but_keeps_execution(self):
