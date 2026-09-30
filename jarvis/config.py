@@ -79,7 +79,8 @@ def validate_values(values: dict):
     if "JARVIS_AGENT_MODE" in values and values["JARVIS_AGENT_MODE"] not in ("off", "auto", "always"):
         raise ValueError("JARVIS_AGENT_MODE muss off, auto oder always sein.")
     for key, lo, hi in (("JARVIS_AGENT_MAX_AGENTS", 1, 8), ("JARVIS_AGENT_MAX_PARALLEL", 1, 6),
-                        ("JARVIS_AGENT_MAX_TOKENS", 256, 4096), ("JARVIS_AGENT_MODEL_FALLBACKS", 1, 5)):
+                        ("JARVIS_AGENT_MAX_TOKENS", 256, 4096), ("JARVIS_AGENT_MODEL_FALLBACKS", 1, 5),
+                        ("JARVIS_AGENT_MISSION_EVERY", 1, 20)):
         if key in values:
             try:
                 n = int(values[key])
@@ -165,6 +166,7 @@ def reload():
     g["AGENT_MAX_PARALLEL"] = max(1, min(6, _int("JARVIS_AGENT_MAX_PARALLEL", 4)))
     g["AGENT_MAX_TOKENS"] = max(256, min(4096, _int("JARVIS_AGENT_MAX_TOKENS", 1200)))
     g["AGENT_MODEL_FALLBACKS"] = max(1, min(5, _int("JARVIS_AGENT_MODEL_FALLBACKS", 2)))
+    g["AGENT_MISSION_EVERY"] = max(1, min(20, _int("JARVIS_AGENT_MISSION_EVERY", 4)))
     g["AGENT_PREFER_FREE"] = _env("JARVIS_AGENT_PREFER_FREE", "1") == "1"
     g["AGENT_ALLOW_PREMIUM"] = _env("JARVIS_AGENT_ALLOW_PREMIUM", "0") == "1"
     g["ANTHROPIC_API_KEY"] = _env("ANTHROPIC_API_KEY") or _env("CLAUDE_API_KEY")
@@ -181,6 +183,7 @@ def reload():
                      "JARVIS_AGENT_MAX_PARALLEL": str(g["AGENT_MAX_PARALLEL"]),
                      "JARVIS_AGENT_MAX_TOKENS": str(g["AGENT_MAX_TOKENS"]),
                      "JARVIS_AGENT_MODEL_FALLBACKS": str(g["AGENT_MODEL_FALLBACKS"]),
+                     "JARVIS_AGENT_MISSION_EVERY": str(g["AGENT_MISSION_EVERY"]),
                      "JARVIS_AGENT_PREFER_FREE": "1" if g["AGENT_PREFER_FREE"] else "0",
                      "JARVIS_AGENT_ALLOW_PREMIUM": "1" if g["AGENT_ALLOW_PREMIUM"] else "0"})
     # --- Lokales Gehirn (Ollama) ---
