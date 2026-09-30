@@ -13,7 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import autopilot, brain, config, db, pc, voice, xkiro
+from . import agents, autopilot, brain, config, db, pc, voice, xkiro
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .tools import NOTIFY_HOOKS
@@ -168,6 +168,7 @@ async def state(req: Request):
         "telegram_paired": bool(config.TELEGRAM_ALLOWED_USER_IDS),
         "pair_code": telegram_bot.pair_code() if config.TELEGRAM_BOT_TOKEN else "",
         "bot_name": db.get_setting("telegram_bot_name", ""),
+        "agents": agents.public_state(),
         "missions": missions,
         "approvals": db.q("SELECT id,mission_id,kind,question,details FROM approvals WHERE status='pending' ORDER BY id"),
         "schedules": [{**s, "next_run_fmt": db.fmt_ts(s["next_run"])} for s in
@@ -232,6 +233,9 @@ async def app_config(req: Request):
         "cloud_enabled": config.CLOUD_ENABLED,
         "xkiro_model": config.XKIRO_MODEL, "xkiro_key_set": bool(config.XKIRO_API_KEY),
         "xkiro_reasoning": config.XKIRO_REASONING_EFFORT,
+        "agents_enabled": config.AGENTS_ENABLED, "agent_mode": config.AGENT_MODE,
+        "agent_max_agents": config.AGENT_MAX_AGENTS, "agent_max_parallel": config.AGENT_MAX_PARALLEL,
+        "agent_prefer_free": config.AGENT_PREFER_FREE, "agent_allow_premium": config.AGENT_ALLOW_PREMIUM,
         "claude_model": config.CLAUDE_MODEL, "claude_key_set": bool(config.ANTHROPIC_API_KEY),
         "claude_budget": config.DAILY_BUDGET_USD,
         "telegram": bool(config.TELEGRAM_BOT_TOKEN), "voice": voice.enabled(),
@@ -242,6 +246,8 @@ SETUP_KEYS = {"TELEGRAM_BOT_TOKEN", "OWNER_NAME", "OWNER_TITLE", "OWNER_INFO", "
               "JARVIS_VISION_MODEL", "WHISPER_MODEL", "N8N_BASE_URL", "N8N_SECRET",
               "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "IMAP_HOST", "STRIPE_SECRET_KEY",
               "JARVIS_PROVIDER", "JARVIS_CLOUD_ENABLED", "XKIRO_API_KEY", "XKIRO_MODEL", "XKIRO_REASONING_EFFORT",
+              "JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_MODE", "JARVIS_AGENT_MAX_AGENTS", "JARVIS_AGENT_MAX_PARALLEL",
+              "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM",
               "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD"}
 
 
