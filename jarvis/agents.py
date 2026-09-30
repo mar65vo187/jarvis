@@ -101,6 +101,11 @@ def should_use_council(text: str) -> bool:
     return bool(_COMPLEX.search(text))
 
 
+def mission_review_due(cycles: int) -> bool:
+    """Use the council on the first mission cycle and periodically afterwards."""
+    return bool(config.AGENTS_ENABLED and int(cycles or 0) % config.AGENT_MISSION_EVERY == 0)
+
+
 def task_type(text: str) -> str:
     if _CODE.search(text):
         return "code"
@@ -312,6 +317,7 @@ def public_state() -> dict:
         "enabled": bool(config.AGENTS_ENABLED),
         "mode": config.AGENT_MODE,
         "max_agents": config.AGENT_MAX_AGENTS,
+        "mission_every": config.AGENT_MISSION_EVERY,
         "prefer_free": bool(config.AGENT_PREFER_FREE),
         "allow_premium": bool(config.AGENT_ALLOW_PREMIUM),
         "roles": [{"key": s.key, "name": s.name} for s in SPECS.values()],
