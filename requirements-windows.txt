@@ -1,0 +1,9 @@
+-r requirements.txt
+pyautogui>=0.9.54,<1
+pygetwindow>=0.0.9
+pyperclip>=1.8,<2
+pillow>=10,<13
+psutil>=5.9,<8
+pystray>=0.19,<1
+keyboard>=0.13,<1
+pywin32>=306; sys_platform == "win32"
