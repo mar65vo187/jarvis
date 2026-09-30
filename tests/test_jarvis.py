@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TMP = Path(tempfile.mkdtemp(prefix="jarvis-test-"))
+TMP = Path(tempfile.mkdtemp(prefix="jarvis-test-")).resolve()
 os.environ.update({
     "DATA_DIR": str(TMP / "data"), "JARVIS_ENV_FILE": str(TMP / ".env"), "JARVIS_LOCAL": "1",
     "APPROVAL_WAIT_SEC": "8", "PORT": "18765", "JARVIS_FULL_ACCESS": "1",
@@ -173,7 +173,7 @@ class Files(unittest.TestCase):
             return res
         out, err = run(go())
         self.assertFalse(err, out)
-        self.assertFalse(f.exists())
+        self.assertFalse(f.exists(), out)
         self.assertTrue(any(b.read_text(encoding="utf-8") == "wichtig" for b in config.BACKUP_DIR.rglob("weg.txt")))
 
     def test_risky_shell_not_executed_without_approval(self):
