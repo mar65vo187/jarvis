@@ -322,7 +322,7 @@ async function poll(){
   $('#ki').textContent=!o.ok?'OFFLINE':o.model_ok?'BEREIT':'MODELL FEHLT';
   $('#ki').style.color=o.ok&&o.model_ok?'var(--ok)':'var(--bad)';
   $('#kiMsg').textContent=o.ok&&o.model_ok?s.model:(o.msg||'');
-  $('#costMsg').textContent=s.provider==='claude'?`Heute ca. ${Number(s.usage.cost_usd).toFixed(3)} · Tageslimit ${s.usage.budget_usd?'
+  $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):'Lokale KI: keine API-Gebühren';
   $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
   $('#skl').textContent=s.skills;
   $('#mem').textContent=s.memory_count;$('#vox').textContent=s.voice?'WHISPER':'BROWSER';
