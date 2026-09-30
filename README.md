@@ -1,12 +1,17 @@
-# J.A.R.V.I.S. — Claude + lokale KI
+# J.A.R.V.I.S. — Multi-Agent KI + lokale KI
 
 Persönlicher Assistent mit deutschem Dashboard, Werkzeugen, SQLite-Gedächtnis,
 Missionen, Zeitplänen, optionaler PC-Steuerung und Telegram-Kopplung.
 
 **Drei KI-Wege sind eingebaut:** xKiro als Multi-Modell-Gateway, Claude direkt über
-die Anthropic Messages API und Ollama für vollständig lokale Inferenz. Das Dashboard
-zeigt den tatsächlichen KI-Status, kann den aktuellen xKiro-Modellkatalog laden und
-hat einen Cloud-Sperrschalter für reinen Offline-/Lokalbetrieb.
+die Anthropic Messages API und Ollama für vollständig lokale Inferenz. Zusätzlich
+besitzt Jarvis einen **Multi-Agenten-Rat**: Bei komplexen Aufgaben wählt er aus dem
+Live-xKiro-Katalog mehrere unterschiedliche Spezialisten für Strategie, Recherche,
+Engineering, Analyse, Kritik, Sicherheit, Kreativität und Abschlussprüfung. Diese
+Agenten beraten ausschließlich; nur der Master-Jarvis erhält Werkzeuge und darf handeln.
+
+Das Dashboard zeigt den tatsächlichen KI-Status, Agentenstatus, den aktuellen
+xKiro-Modellkatalog und einen Cloud-Sperrschalter für reinen Offline-/Lokalbetrieb.
 
 ## Windows 10/11
 
@@ -38,6 +43,23 @@ python -m jarvis --show
 Dashboard: http://127.0.0.1:8765. Keine öffentliche Netzwerkfreigabe.
 Für Windows-PC-Steuerung zusätzlich `requirements-windows.txt` installieren.
 
+## Multi-Agenten-Architektur
+
+Bei `JARVIS_AGENT_MODE=auto` startet Jarvis den Rat nur bei Aufgaben, die von
+mehreren Perspektiven profitieren. Die Modell-IDs werden **nicht hart verdrahtet**:
+Jarvis liest `GET /v1/models` und berücksichtigt Anbieter, Fähigkeiten,
+Zugangsstufe, Kontextgröße und Kostenpräferenz. Dadurch können neue xKiro-Modelle
+automatisch Kandidaten werden, ohne den Jarvis-Code zu ändern.
+
+Der Rat umfasst bis zu acht definierte Rollen: **Strategist, Researcher, Engineer,
+Analyst, Critic, Security, Creative und Auditor**. Pro Aufgabe wird nur eine passende
+Teilmenge gestartet. Der Researcher kann xKiros Live-Websuche verwenden. Ergebnisse
+werden als Beratung in den Systemkontext des Masters gegeben; Seiteneffekte bleiben
+zentral beim Master und seinen Freigaberegeln.
+
+Wichtige Schalter stehen in `.env.example` und im Dashboard. Standard: maximal
+5 Spezialisten, 4 parallel, kostenlose Modelle bevorzugt, Premium aus.
+
 ## Anbieter
 
 | Einstellung | Verhalten |
@@ -64,9 +86,10 @@ python -m jarvis --check
 
 `--check` prüft Zugang und Modell ohne Textgenerierung; fehlende Verbindung gibt
 Exitcode 1 zurück. Der Dashboard-Test erzeugt eine kurze echte KI-Antwort.
-Tests simulieren Claude/Ollama und Telegram, brauchen keine Schlüssel und führen
-keine echten PC-Aktionen aus. GitHub Actions prüft Linux und Windows sowie die
-PowerShell-Syntax; anschließend entsteht ein Download mit dem geprüften Quellstand.
+Tests simulieren Claude/Ollama/xKiro, Multi-Agenten, Telegram und Werkzeugaufrufe,
+brauchen keine echten Schlüssel und führen keine echten PC-Aktionen aus. GitHub
+Actions prüft Linux und Windows sowie einen Browser-End-to-End-Test; anschließend
+entsteht ein Download mit dem geprüften Quellstand.
 
 Ausführliche Einrichtung und optionale Integrationen: [ANLEITUNG.md](ANLEITUNG.md).
 
