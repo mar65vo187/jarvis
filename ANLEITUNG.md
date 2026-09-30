@@ -28,6 +28,23 @@ Mit **Cloud-KI = AUS** werden xKiro und Claude hart deaktiviert; Jarvis fällt d
 auf den lokalen Ollama-Weg zurück. Schlüssel bleiben in der lokalen `.env` und
 werden nicht vom Dashboard zurückgegeben.
 
+### Multi-Agenten-Rat
+
+Unter **EINSTELLUNGEN → Multi-Agenten-Rat** kann Jarvis mehrere unterschiedliche
+xKiro-Modelle als Spezialisten einsetzen. Standard ist **AUTO**: Nur bei komplexen
+Aufgaben werden bis zu fünf Rollen ausgewählt. Mögliche Rollen sind Strategist,
+Researcher, Engineer, Analyst, Critic, Security, Creative und Auditor.
+
+Die Spezialisten bekommen **keine PC-/Datei-/Zahlungswerkzeuge**. Sie liefern nur
+Analyse und Gegenprüfung; der Master-Jarvis entscheidet danach und führt Aktionen
+über seine normalen Werkzeuge und Freigaberegeln aus.
+
+Jarvis liest den xKiro-Livekatalog und wählt passende Modelle nach Anbieter,
+Fähigkeiten, Zugangsstufe und Kostenpräferenz. Dadurch ist keine feste Liste von
+Modellnamen nötig. Standardmäßig werden kostenlose Modelle bevorzugt und
+Premium-Modelle nicht verwendet. Wer maximale Qualität statt Kostenpriorität will,
+kann die Kostenpräferenz deaktivieren oder Premium explizit erlauben.
+
 ## 3. Claude verbinden
 
 1. In der [Claude Console](https://platform.claude.com/) einen eigenen
@@ -126,6 +143,8 @@ Nur separat eingerichtete n8n-Workflows laufen auf einem Server weiter.
 |---|---|
 | xKiro-Schlüssel fehlt | EINSTELLUNGEN → xKiro-API-Schlüssel speichern |
 | xKiro-Modell fehlt | **XKIRO-MODELLE LADEN** und eine aktuelle Modell-ID auswählen |
+| Agentenrat bleibt aus | xKiro als aktiven Anbieter nutzen, Agentenrat = AN und Modus = AUTO/IMMER |
+| Zu viele Agentenkosten | kostenlose Modelle bevorzugen, Max. Spezialisten reduzieren oder Agenten-Modus = AUS |
 | Cloud-KI soll aus bleiben | EINSTELLUNGEN → **Cloud-KI = AUS**; Jarvis nutzt Ollama |
 | Claude-Schlüssel fehlt | EINSTELLUNGEN → Anthropic-API-Schlüssel speichern |
 | Claude 401 | Schlüssel in der Console prüfen/erneuern |

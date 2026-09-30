@@ -73,6 +73,21 @@ def validate_values(values: dict):
         raise ValueError("JARVIS_CLOUD_ENABLED muss 0 oder 1 sein.")
     if "XKIRO_REASONING_EFFORT" in values and values["XKIRO_REASONING_EFFORT"] not in ("", "none", "low", "medium", "high", "xhigh", "max"):
         raise ValueError("XKIRO_REASONING_EFFORT ist ungültig.")
+    for key in ("JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM"):
+        if key in values and values[key] not in ("0", "1"):
+            raise ValueError(f"{key} muss 0 oder 1 sein.")
+    if "JARVIS_AGENT_MODE" in values and values["JARVIS_AGENT_MODE"] not in ("off", "auto", "always"):
+        raise ValueError("JARVIS_AGENT_MODE muss off, auto oder always sein.")
+    for key, lo, hi in (("JARVIS_AGENT_MAX_AGENTS", 1, 8), ("JARVIS_AGENT_MAX_PARALLEL", 1, 6),
+                        ("JARVIS_AGENT_MAX_TOKENS", 256, 4096), ("JARVIS_AGENT_MODEL_FALLBACKS", 1, 5),
+                        ("JARVIS_AGENT_MISSION_EVERY", 1, 20)):
+        if key in values:
+            try:
+                n = int(values[key])
+            except ValueError:
+                raise ValueError(f"{key} muss eine Ganzzahl sein.") from None
+            if not lo <= n <= hi:
+                raise ValueError(f"{key} muss zwischen {lo} und {hi} liegen.")
     if "OLLAMA_BASE_URL" in values:
         u = urlsplit(values["OLLAMA_BASE_URL"])
         if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost", "::1") or u.username or u.password or u.path not in ("", "/") or u.query or u.fragment:
@@ -144,6 +159,16 @@ def reload():
     g["XKIRO_NUM_CTX"] = max(4096, _int("XKIRO_NUM_CTX", 200000))
     g["XKIRO_MAX_TOKENS"] = max(256, _int("XKIRO_MAX_TOKENS", 4096))
     g["XKIRO_REASONING_EFFORT"] = _env("XKIRO_REASONING_EFFORT")
+    # --- Multi-Agentenrat: spezialisierte Cloud-Modelle beraten den Master-Jarvis ---
+    g["AGENTS_ENABLED"] = _env("JARVIS_AGENTS_ENABLED", "1") == "1"
+    g["AGENT_MODE"] = _env("JARVIS_AGENT_MODE", "auto") or "auto"
+    g["AGENT_MAX_AGENTS"] = max(1, min(8, _int("JARVIS_AGENT_MAX_AGENTS", 5)))
+    g["AGENT_MAX_PARALLEL"] = max(1, min(6, _int("JARVIS_AGENT_MAX_PARALLEL", 4)))
+    g["AGENT_MAX_TOKENS"] = max(256, min(4096, _int("JARVIS_AGENT_MAX_TOKENS", 1200)))
+    g["AGENT_MODEL_FALLBACKS"] = max(1, min(5, _int("JARVIS_AGENT_MODEL_FALLBACKS", 2)))
+    g["AGENT_MISSION_EVERY"] = max(1, min(20, _int("JARVIS_AGENT_MISSION_EVERY", 4)))
+    g["AGENT_PREFER_FREE"] = _env("JARVIS_AGENT_PREFER_FREE", "1") == "1"
+    g["AGENT_ALLOW_PREMIUM"] = _env("JARVIS_AGENT_ALLOW_PREMIUM", "0") == "1"
     g["ANTHROPIC_API_KEY"] = _env("ANTHROPIC_API_KEY") or _env("CLAUDE_API_KEY")
     g["CLAUDE_MODEL"] = _env("CLAUDE_MODEL") or "claude-sonnet-5-5"
     g["CLAUDE_TIMEOUT_SEC"] = max(10, _int("CLAUDE_TIMEOUT_SEC", 180))
@@ -151,7 +176,16 @@ def reload():
     g["CLAUDE_MAX_TOKENS"] = max(256, _int("CLAUDE_MAX_TOKENS", 4096))
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"],
                      "JARVIS_CLOUD_ENABLED": "1" if g["CLOUD_ENABLED"] else "0",
-                     "XKIRO_REASONING_EFFORT": g["XKIRO_REASONING_EFFORT"]})
+                     "XKIRO_REASONING_EFFORT": g["XKIRO_REASONING_EFFORT"],
+                     "JARVIS_AGENTS_ENABLED": "1" if g["AGENTS_ENABLED"] else "0",
+                     "JARVIS_AGENT_MODE": g["AGENT_MODE"],
+                     "JARVIS_AGENT_MAX_AGENTS": str(g["AGENT_MAX_AGENTS"]),
+                     "JARVIS_AGENT_MAX_PARALLEL": str(g["AGENT_MAX_PARALLEL"]),
+                     "JARVIS_AGENT_MAX_TOKENS": str(g["AGENT_MAX_TOKENS"]),
+                     "JARVIS_AGENT_MODEL_FALLBACKS": str(g["AGENT_MODEL_FALLBACKS"]),
+                     "JARVIS_AGENT_MISSION_EVERY": str(g["AGENT_MISSION_EVERY"]),
+                     "JARVIS_AGENT_PREFER_FREE": "1" if g["AGENT_PREFER_FREE"] else "0",
+                     "JARVIS_AGENT_ALLOW_PREMIUM": "1" if g["AGENT_ALLOW_PREMIUM"] else "0"})
     # --- Lokales Gehirn (Ollama) ---
     g["OLLAMA_BASE_URL"] = _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"], "OLLAMA_BASE_URL": g["OLLAMA_BASE_URL"]})

@@ -12,7 +12,9 @@ import httpx
 
 from . import config, db
 
-_lock = asyncio.Lock()
+_lock = asyncio.Semaphore(4)
+_catalog_cache: list[dict] = []
+_catalog_checked = 0.0
 
 
 def _headers() -> dict:
@@ -105,8 +107,11 @@ def _text_content(content) -> str:
     return ""
 
 
-async def list_models() -> list[str]:
-    """Public xKiro chat-model catalog; no API key required."""
+async def list_model_details(force: bool = False) -> list[dict]:
+    """Live xKiro catalog including vendor, access tier, price and capabilities."""
+    global _catalog_cache, _catalog_checked
+    if not force and _catalog_cache and time.time() - _catalog_checked < 300:
+        return [dict(row) for row in _catalog_cache]
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             response = await client.get(f"{config.XKIRO_BASE_URL}/models")
@@ -115,13 +120,21 @@ async def list_models() -> list[str]:
     except (httpx.HTTPError, ValueError) as exc:
         raise RuntimeError(f"xKiro-Modellkatalog nicht erreichbar: {exc}") from None
     rows = data.get("data", []) if isinstance(data, dict) else data if isinstance(data, list) else []
-    ids = []
+    normalized = []
     for row in rows:
         if isinstance(row, dict) and row.get("id"):
-            ids.append(str(row["id"]))
+            normalized.append(dict(row))
         elif isinstance(row, str):
-            ids.append(row)
-    return sorted(set(ids))
+            normalized.append({"id": row, "owned_by": row.split("/", 1)[0]})
+    _catalog_cache = normalized
+    _catalog_checked = time.time()
+    return [dict(row) for row in normalized]
+
+
+async def list_models() -> list[str]:
+    """Public xKiro chat-model IDs; details are retained for agent routing."""
+    rows = await list_model_details()
+    return sorted({str(row.get("id")) for row in rows if row.get("id")})
 
 
 async def check() -> dict:
@@ -163,7 +176,7 @@ async def check() -> dict:
     return status
 
 
-async def call(messages, tools=None, max_tokens=None, model=None):
+async def call(messages, tools=None, max_tokens=None, model=None, reasoning_effort=None, web_search=False):
     if not config.CLOUD_ENABLED:
         raise RuntimeError("Cloud-KI ist gesperrt. In EINSTELLUNGEN aktivieren oder Ollama verwenden.")
     headers = _headers()
@@ -176,8 +189,11 @@ async def call(messages, tools=None, max_tokens=None, model=None):
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
-    if config.XKIRO_REASONING_EFFORT:
-        payload["reasoning_effort"] = config.XKIRO_REASONING_EFFORT
+    effort = config.XKIRO_REASONING_EFFORT if reasoning_effort is None else reasoning_effort
+    if effort:
+        payload["reasoning_effort"] = effort
+    if web_search:
+        payload["web_search"] = {"enable": True, "count": 5}
 
     async with _lock:
         delay = 1.0

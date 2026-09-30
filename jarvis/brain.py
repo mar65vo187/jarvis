@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from . import claude, config, db, prompts, xkiro
+from . import agents, claude, config, db, prompts, xkiro
 from .tools import all_schemas, run_tool
 
 
@@ -253,7 +253,13 @@ async def chat(channel: str, text: str, on_tool=None) -> str:
         msgs = db.history(channel, config.HISTORY_TURNS)
         msgs.append({"role": "user", "content": text})
         try:
-            reply = await think(msgs, {"channel": channel}, on_tool=on_tool)
+            council_context = ""
+            try:
+                council_context = await agents.council(text)
+            except Exception:
+                # Specialist failure must never take the master Jarvis offline.
+                council_context = ""
+            reply = await think(msgs, {"channel": channel}, extra_system=council_context, on_tool=on_tool)
         except Exception as e:
             reply = f"KI konnte die Anfrage nicht ausführen: {e}"
         db.add_message(channel, "user", text)

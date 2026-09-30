@@ -23,7 +23,10 @@ class Integration(unittest.TestCase):
         config.ENV_FILE = Path(self.tmp.name) / '.env'
         os.environ['JARVIS_PROVIDER'] = 'auto'
         for key in ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_DAILY_BUDGET_USD', 'CLAUDE_MODEL', 'CLAUDE_PRICE_IN', 'CLAUDE_PRICE_OUT',
-                    'XKIRO_API_KEY', 'XKIRO_MODEL', 'XKIRO_REASONING_EFFORT', 'JARVIS_CLOUD_ENABLED'):
+                    'XKIRO_API_KEY', 'XKIRO_MODEL', 'XKIRO_REASONING_EFFORT', 'JARVIS_CLOUD_ENABLED',
+                    'JARVIS_AGENTS_ENABLED', 'JARVIS_AGENT_MODE', 'JARVIS_AGENT_MAX_AGENTS',
+                    'JARVIS_AGENT_MAX_PARALLEL', 'JARVIS_AGENT_MAX_TOKENS', 'JARVIS_AGENT_MODEL_FALLBACKS',
+                    'JARVIS_AGENT_MISSION_EVERY', 'JARVIS_AGENT_PREFER_FREE', 'JARVIS_AGENT_ALLOW_PREMIUM'):
             os.environ.pop(key, None)
         config.reload()
         db.ex('DELETE FROM usage')
