@@ -13,7 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import autopilot, brain, config, db, pc, voice
+from . import autopilot, brain, config, db, pc, voice, xkiro
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .tools import NOTIFY_HOOKS
@@ -32,6 +32,15 @@ NOTIFY_HOOKS.append(_notify_hook)
 
 def _token() -> str:
     return hashlib.sha256(f"jarvis::{config.JARVIS_PASSWORD}".encode()).hexdigest()
+
+
+def _provider_status():
+    provider = config.active_provider()
+    if provider == "claude":
+        return config.CLAUDE_STATUS
+    if provider == "xkiro":
+        return config.XKIRO_STATUS
+    return config.OLLAMA_STATUS
 
 
 def _is_local(req: Request) -> bool:
@@ -141,13 +150,14 @@ async def state(req: Request):
     for m in missions:
         m["next_run_fmt"] = db.fmt_ts(m["next_run"])
     from . import guard, telegram_bot
-    status = config.CLAUDE_STATUS if config.active_provider() == "claude" else config.OLLAMA_STATUS
+    status = _provider_status()
     return JSONResponse({
         "model": config.active_model(),
-        "vision": "Claude Vision" if config.active_provider() == "claude" else config.VISION_MODEL,
+        "vision": "Claude Vision" if config.active_provider() == "claude" else "xKiro Vision" if config.active_provider() == "xkiro" else config.VISION_MODEL,
         "provider": config.active_provider(),
         "llm": {k: v for k, v in status.items() if k != "checked"},
-        "usage": {"cost_usd": db.cost_today(), "budget_usd": config.DAILY_BUDGET_USD if config.active_provider() == "claude" else 0},
+        "usage": {"cost_usd": db.cost_today(), "budget_usd": config.DAILY_BUDGET_USD if config.active_provider() == "claude" else 0,
+                  "provider_usage": status.get("usage", "")},
         "ollama": {k: v for k, v in config.OLLAMA_STATUS.items() if k != "checked"},
         "notaus": guard.stopped(),
         "full_access": config.FULL_ACCESS,
@@ -219,6 +229,9 @@ async def app_config(req: Request):
         "name": config.OWNER_NAME, "title": config.OWNER_TITLE, "info": config.OWNER_INFO,
         "model": config.MODEL, "vision": config.VISION_MODEL,
         "provider": config.PROVIDER, "active_provider": config.active_provider(),
+        "cloud_enabled": config.CLOUD_ENABLED,
+        "xkiro_model": config.XKIRO_MODEL, "xkiro_key_set": bool(config.XKIRO_API_KEY),
+        "xkiro_reasoning": config.XKIRO_REASONING_EFFORT,
         "claude_model": config.CLAUDE_MODEL, "claude_key_set": bool(config.ANTHROPIC_API_KEY),
         "claude_budget": config.DAILY_BUDGET_USD,
         "telegram": bool(config.TELEGRAM_BOT_TOKEN), "voice": voice.enabled(),
@@ -228,7 +241,8 @@ async def app_config(req: Request):
 SETUP_KEYS = {"TELEGRAM_BOT_TOKEN", "OWNER_NAME", "OWNER_TITLE", "OWNER_INFO", "JARVIS_MODEL",
               "JARVIS_VISION_MODEL", "WHISPER_MODEL", "N8N_BASE_URL", "N8N_SECRET",
               "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "IMAP_HOST", "STRIPE_SECRET_KEY",
-              "JARVIS_PROVIDER", "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD"}
+              "JARVIS_PROVIDER", "JARVIS_CLOUD_ENABLED", "XKIRO_API_KEY", "XKIRO_MODEL", "XKIRO_REASONING_EFFORT",
+              "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD"}
 
 
 async def setup(req: Request):
@@ -251,6 +265,15 @@ async def setup(req: Request):
     from . import main as jmain
     status = await jmain.check_provider(start_if_needed=False)
     return JSONResponse({"ok": True, "saved": sorted(vals), "llm": {k: v for k, v in status.items() if k != "checked"}})
+
+
+async def xkiro_models(req: Request):
+    if not _is_local(req) and not _authed(req):
+        return _deny()
+    try:
+        return JSONResponse({"models": await xkiro.list_models()})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
 
 
 async def check_ai(req: Request):
@@ -279,7 +302,7 @@ async def notaus(req: Request):
 
 
 async def health(req):
-    status = config.CLAUDE_STATUS if config.active_provider() == "claude" else config.OLLAMA_STATUS
+    status = _provider_status()
     return JSONResponse({"ok": True, "app": "jarvis", "version": "2.0.0", "provider": config.active_provider(),
                          "ai_ready": bool(status.get("ok") and status.get("model_ok"))})
 
@@ -294,6 +317,7 @@ app = Starlette(exception_handlers={ValueError: bad_request, TypeError: bad_requ
     Route("/health", health),
     Route("/api/config", app_config),
     Route("/api/setup", setup, methods=["POST"]),
+    Route("/api/xkiro-models", xkiro_models),
     Route("/api/login", login, methods=["POST"]),
     Route("/api/chat", chat, methods=["POST"]),
     Route("/api/check", check_ai, methods=["POST"]),

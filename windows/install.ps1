@@ -107,11 +107,15 @@ if (Test-Path $EnvFile) {
 $Provider = $Existing["JARVIS_PROVIDER"]
 if (-not $Provider) {
     Write-Host ""
-    $choice = Read-Host "  KI waehlen: Claude (API-Schluessel im Fenster) oder lokale KI/Ollama? [C/l]"
-    $Provider = if ($choice -match '^[lL]') { "ollama" } else { "claude" }
+    $choice = Read-Host "  KI waehlen: xKiro Multi-Modell, Claude direkt oder lokale KI/Ollama? [X/c/l]"
+    if ($choice -match '^[lL]') { $Provider = "ollama" }
+    elseif ($choice -match '^[cC]') { $Provider = "claude" }
+    else { $Provider = "xkiro" }
 }
+$CloudEnabled = if ($Existing.ContainsKey("JARVIS_CLOUD_ENABLED")) { $Existing["JARVIS_CLOUD_ENABLED"] -ne "0" } else { $true }
+$HasXKiroKey = $Existing["XKIRO_API_KEY"] -or $env:XKIRO_API_KEY
 $HasClaudeKey = $Existing["ANTHROPIC_API_KEY"] -or $env:ANTHROPIC_API_KEY -or $env:CLAUDE_API_KEY
-$UseLocal = ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasClaudeKey)
+$UseLocal = (-not $CloudEnabled) -or ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasXKiroKey -and -not $HasClaudeKey)
 $Model = if ($Existing["JARVIS_MODEL"] -and $Existing["JARVIS_MODEL"] -notmatch '^claude') { $Existing["JARVIS_MODEL"] } else { "qwen3:8b" }
 $VisionSet = $Existing["JARVIS_VISION_MODEL"]
 $Tune = [ordered]@{}
@@ -232,8 +236,14 @@ if ((-not $VisionSet) -and $OfferVision) {
 
 
 } else {
-    Say "Claude-Modus: kein Ollama und kein lokaler Modelldownload erforderlich."
-    Say "Anthropic-API-Schluessel wird im Jarvis-Fenster eingerichtet."
+    Say "Cloud-KI-Modus: kein Ollama und kein lokaler Modelldownload erforderlich."
+    if ($Provider -eq "xkiro") {
+        Say "xKiro-API-Schluessel und Modell werden im Jarvis-Fenster eingerichtet."
+    } elseif ($Provider -eq "claude") {
+        Say "Anthropic-API-Schluessel wird im Jarvis-Fenster eingerichtet."
+    } else {
+        Say "xKiro/Claude-Zugang wird im Jarvis-Fenster eingerichtet."
+    }
 }
 
 # ------------------------------------------------------------------ .env schreiben/ergaenzen
@@ -249,6 +259,7 @@ function Set-EnvValue([string]$Key, [string]$Value) {
 }
 if (-not (Test-Path $EnvFile)) { Copy-Item (Join-Path $Target ".env.example") $EnvFile }
 Set-EnvValue "JARVIS_PROVIDER" $Provider
+Set-EnvValue "JARVIS_CLOUD_ENABLED" $(if ($CloudEnabled) { "1" } else { "0" })
 Set-EnvValue "JARVIS_MODEL" $Model
 Set-EnvValue "JARVIS_VISION_MODEL" $VisionSet
 Set-EnvValue "OLLAMA_BASE_URL" "http://127.0.0.1:11434"

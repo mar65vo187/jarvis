@@ -8,14 +8,27 @@
 4. Der Installer installiert Python im Benutzerkonto, richtet die Python-Umgebung
    ein und kopiert Jarvis nach `%LOCALAPPDATA%\Jarvis`.
 5. Zusatzpakete sind optional. Für reine Textaufgaben **N** wählen.
-6. Bei der KI-Auswahl **C** für Claude oder **L** für Ollama wählen.
-7. Im geöffneten Fenster Einrichtung speichern, dann **KI-VERBINDUNG TESTEN**.
+6. Bei der KI-Auswahl **X** für xKiro, **C** für Claude oder **L** für Ollama wählen.
+7. Im geöffneten Fenster Zugang/Modell eintragen, Einrichtung speichern und **KI-VERBINDUNG TESTEN** ausführen.
 
 Autostart und Desktop-Verknüpfung werden eingerichtet. Jarvis läuft mit deinen
 normalen Benutzerrechten. Updates behalten Einstellungen, Chats, Gedächtnis,
 Missionen, Sicherungen und eigene Skills. Keine Datenbank wird zurückgesetzt.
 
-## 2. Claude verbinden
+## 2. xKiro Multi-Modell verbinden
+
+1. In deinem xKiro-Konto einen API-Schlüssel erzeugen.
+2. Im Jarvis-Fenster **EINSTELLUNGEN** öffnen und **xKiro** wählen.
+3. API-Schlüssel eintragen. Mit **XKIRO-MODELLE LADEN** lädt Jarvis den aktuellen
+   Modellkatalog und du wählst die gewünschte Modell-ID im Format `anbieter/modell`.
+4. Optional Reasoning-Stufe wählen, dann **SPEICHERN & STARTEN**.
+5. **KI-VERBINDUNG TESTEN** erzeugt eine echte kurze Antwort.
+
+Mit **Cloud-KI = AUS** werden xKiro und Claude hart deaktiviert; Jarvis fällt dann
+auf den lokalen Ollama-Weg zurück. Schlüssel bleiben in der lokalen `.env` und
+werden nicht vom Dashboard zurückgegeben.
+
+## 3. Claude verbinden
 
 1. In der [Claude Console](https://platform.claude.com/) einen eigenen
    Anthropic-API-Schlüssel erzeugen und API-Abrechnung einrichten.
@@ -38,7 +51,7 @@ Abrechnungslimit. Bei Modellwechsel `CLAUDE_PRICE_IN` und `CLAUDE_PRICE_OUT`
 (USD je Million Tokens) nach aktueller Preisliste ändern. `0` deaktiviert das
 Jarvis-Tageslimit. Ollama benötigt kein API-Budget.
 
-## 3. Ollama lokal
+## 4. Ollama lokal
 
 Bei Installation **L** wählen. Der Installer installiert Ollama, startet dessen
 lokalen Dienst und lädt ein Modell passend zum Arbeitsspeicher. Dieser erste
@@ -53,9 +66,9 @@ Download umfasst mehrere GB. Ein Seh-Modell ist optional.
 Kleine Modelle sind bei komplexen Aufgaben deutlich schwächer als Cloudmodelle.
 Mit 6 GB RAM wird es knapp; große andere Programme schließen. Für Textaufgaben
 ist kein Seh-Modell erforderlich. Für Screenshots benötigt Ollama ein Seh-Modell;
-Claude kann Bilder ohne zusätzliches lokales Modell analysieren.
+Claude und geeignete xKiro-Modelle können Bilder ohne zusätzliches lokales Modell analysieren.
 
-## 4. Telegram optional verbinden
+## 5. Telegram optional verbinden
 
 1. In Telegram **@BotFather → /newbot** und eigenen Bot erstellen.
 2. Bot-Token in Jarvis **EINSTELLUNGEN** eintragen, speichern.
@@ -82,7 +95,7 @@ Spracherkennung und Sprachausgabe bereitstellen. Browser-Sprachdienste können
 Cloud-Dienste nutzen. Telegram-Sprachausgabe ist derzeit nicht implementiert;
 Telegram-Antworten kommen als Text.
 
-## 5. Funktionen und Voraussetzungen
+## 6. Funktionen und Voraussetzungen
 
 Chats, Gedächtnis, Missionen, Zeitpläne, Dateiwerkzeuge und eigene Skills nutzen
 SQLite und den lokalen Arbeitsordner. Die ausgewählte KI muss erreichbar sein.
@@ -107,10 +120,13 @@ Linux-Server und eine Domain. Es wurde hier kein Server gebucht oder bereitgeste
 Wenn der PC ausgeschaltet ist, führt der lokale Jarvis keine Missionen aus.
 Nur separat eingerichtete n8n-Workflows laufen auf einem Server weiter.
 
-## 6. Diagnose
+## 7. Diagnose
 
 | Problem | Lösung |
 |---|---|
+| xKiro-Schlüssel fehlt | EINSTELLUNGEN → xKiro-API-Schlüssel speichern |
+| xKiro-Modell fehlt | **XKIRO-MODELLE LADEN** und eine aktuelle Modell-ID auswählen |
+| Cloud-KI soll aus bleiben | EINSTELLUNGEN → **Cloud-KI = AUS**; Jarvis nutzt Ollama |
 | Claude-Schlüssel fehlt | EINSTELLUNGEN → Anthropic-API-Schlüssel speichern |
 | Claude 401 | Schlüssel in der Console prüfen/erneuern |
 | Claude-Modell fehlt | Für deinen Zugang verfügbares Modell einstellen |
@@ -123,7 +139,7 @@ Nur separat eingerichtete n8n-Workflows laufen auf einem Server weiter.
 `python -m jarvis --check` liefert eine maschinenlesbare Diagnose.
 `/health` prüft den App-Server; `ai_ready` zeigt getrennt den KI-Status.
 
-## 7. Daten und Deinstallation
+## 8. Daten und Deinstallation
 
 Windows: `%LOCALAPPDATA%\Jarvis\.env` und `data\`.
 Direkter Start aus dem Repository: `.env` und `data/` dort; über `DATA_DIR`

@@ -50,6 +50,13 @@ class Basics(unittest.TestCase):
         self.assertIn("TarifWerk", config.OWNER_INFO)
         self.assertEqual(config.MODEL, "qwen3:8b")
 
+    def test_hud_single_document_and_xkiro_setup(self):
+        html = (ROOT / "hud" / "index.html").read_text(encoding="utf-8")
+        self.assertEqual(html.lower().count("</html>"), 1)
+        self.assertEqual(html.lower().count("</script>"), 1)
+        for needle in ("XKIRO_API_KEY", "XKIRO_MODEL", "JARVIS_CLOUD_ENABLED", "XKIRO-MODELLE LADEN"):
+            self.assertIn(needle, html)
+
     def test_full_access_paths(self):
         p = guard.resolve_path(str(TMP / "irgendwo" / "x.txt"))
         self.assertEqual(p, (TMP / "irgendwo" / "x.txt").resolve())

@@ -67,8 +67,12 @@ def save_env(values: dict):
 
 
 def validate_values(values: dict):
-    if values.get("JARVIS_PROVIDER", "auto") not in ("auto", "claude", "ollama"):
-        raise ValueError("KI-Anbieter muss auto, claude oder ollama sein.")
+    if values.get("JARVIS_PROVIDER", "auto") not in ("auto", "xkiro", "claude", "ollama"):
+        raise ValueError("KI-Anbieter muss auto, xkiro, claude oder ollama sein.")
+    if "JARVIS_CLOUD_ENABLED" in values and values["JARVIS_CLOUD_ENABLED"] not in ("0", "1"):
+        raise ValueError("JARVIS_CLOUD_ENABLED muss 0 oder 1 sein.")
+    if "XKIRO_REASONING_EFFORT" in values and values["XKIRO_REASONING_EFFORT"] not in ("", "none", "low", "medium", "high", "xhigh", "max"):
+        raise ValueError("XKIRO_REASONING_EFFORT ist ungültig.")
     if "OLLAMA_BASE_URL" in values:
         u = urlsplit(values["OLLAMA_BASE_URL"])
         if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost", "::1") or u.username or u.password or u.path not in ("", "/") or u.query or u.fragment:
@@ -90,11 +94,24 @@ def validate_values(values: dict):
 
 
 def active_provider() -> str:
-    return ("claude" if ANTHROPIC_API_KEY else "ollama") if PROVIDER == "auto" else PROVIDER
+    if PROVIDER == "auto":
+        if CLOUD_ENABLED and XKIRO_API_KEY:
+            return "xkiro"
+        if CLOUD_ENABLED and ANTHROPIC_API_KEY:
+            return "claude"
+        return "ollama"
+    if PROVIDER in ("xkiro", "claude") and not CLOUD_ENABLED:
+        return "ollama"
+    return PROVIDER
 
 
 def active_model() -> str:
-    return CLAUDE_MODEL if active_provider() == "claude" else MODEL
+    provider = active_provider()
+    if provider == "xkiro":
+        return XKIRO_MODEL
+    if provider == "claude":
+        return CLAUDE_MODEL
+    return MODEL
 
 
 def _env(name: str, default: str = "") -> str:
@@ -119,11 +136,22 @@ def reload():
     load_env_file()
     g = globals()
     g["PROVIDER"] = _env("JARVIS_PROVIDER", "auto")
+    g["CLOUD_ENABLED"] = _env("JARVIS_CLOUD_ENABLED", "1") == "1"
+    g["XKIRO_API_KEY"] = _env("XKIRO_API_KEY")
+    g["XKIRO_BASE_URL"] = "https://api.xkiro.com/v1"
+    g["XKIRO_MODEL"] = _env("XKIRO_MODEL") or "openai/gpt-5.6-sol"
+    g["XKIRO_TIMEOUT_SEC"] = max(10, _int("XKIRO_TIMEOUT_SEC", 105))
+    g["XKIRO_NUM_CTX"] = max(4096, _int("XKIRO_NUM_CTX", 200000))
+    g["XKIRO_MAX_TOKENS"] = max(256, _int("XKIRO_MAX_TOKENS", 4096))
+    g["XKIRO_REASONING_EFFORT"] = _env("XKIRO_REASONING_EFFORT")
     g["ANTHROPIC_API_KEY"] = _env("ANTHROPIC_API_KEY") or _env("CLAUDE_API_KEY")
     g["CLAUDE_MODEL"] = _env("CLAUDE_MODEL") or "claude-sonnet-5-5"
     g["CLAUDE_TIMEOUT_SEC"] = max(10, _int("CLAUDE_TIMEOUT_SEC", 180))
     g["CLAUDE_NUM_CTX"] = max(4096, _int("CLAUDE_NUM_CTX", 100000))
     g["CLAUDE_MAX_TOKENS"] = max(256, _int("CLAUDE_MAX_TOKENS", 4096))
+    validate_values({"JARVIS_PROVIDER": g["PROVIDER"],
+                     "JARVIS_CLOUD_ENABLED": "1" if g["CLOUD_ENABLED"] else "0",
+                     "XKIRO_REASONING_EFFORT": g["XKIRO_REASONING_EFFORT"]})
     # --- Lokales Gehirn (Ollama) ---
     g["OLLAMA_BASE_URL"] = _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"], "OLLAMA_BASE_URL": g["OLLAMA_BASE_URL"]})
@@ -213,6 +241,7 @@ TELEGRAM_ALLOWED_USER_IDS: set = set()
 # Laufzeitstatus der lokalen KI (wird von main.check_ollama aktualisiert, vom HUD angezeigt)
 OLLAMA_STATUS: dict = {"ok": False, "model_ok": False, "vision_ok": False, "msg": "prüfe …", "checked": 0.0}
 CLAUDE_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0}
+XKIRO_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0, "usage": ""}
 reload()
 
 HOME = Path.home()

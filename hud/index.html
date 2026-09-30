@@ -93,8 +93,11 @@ textarea.sin{font-family:inherit;resize:vertical}
 #toast div{background:#062033;border:1px solid var(--cyan);padding:10px 16px;width:min(520px,calc(100vw - 32px));white-space:pre-wrap;box-shadow:0 0 20px rgba(56,212,255,.3)}
 /* Mobile */
 @media (max-width:980px){
-  body{overflow:auto}
-  #app{grid-template-columns:1fr;height:auto;padding:12px 16px}
+  html,body{width:100%;max-width:100%;overflow-x:hidden}
+  body{overflow-y:auto}
+  #app{grid-template-columns:minmax(0,1fr);height:auto;width:100%;max-width:100vw;padding:12px 16px;overflow-x:hidden}
+  #center,.col,.panel,#bar{min-width:0;max-width:100%}
+  #inp{min-width:0}
   #center{min-height:92vh;order:-1}
   #top{font-size:11px;letter-spacing:.05em}#top b{font-size:16px;letter-spacing:.3em}
   #model{display:none}
@@ -120,9 +123,22 @@ textarea.sin{font-family:inherit;resize:vertical}
   <label>Anrede<input class="sin" name="OWNER_TITLE" value="Sir"></label>
   <label>Über dich / dein Business (Jarvis arbeitet damit)<textarea class="sin" name="OWNER_INFO" rows="3"></textarea></label>
   <label>KI-Anbieter<select class="sin" name="JARVIS_PROVIDER">
-   <option value="auto">Automatisch: Claude mit Schlüssel, sonst Ollama</option>
+   <option value="auto">Automatisch: xKiro → Claude → Ollama</option>
+   <option value="xkiro">xKiro (viele Cloud-Modelle)</option>
    <option value="claude">Claude (Anthropic API)</option>
    <option value="ollama">Ollama (lokal)</option>
+  </select></label>
+  <label>Cloud-KI<select class="sin" name="JARVIS_CLOUD_ENABLED">
+   <option value="1">AN – xKiro/Claude erlaubt</option>
+   <option value="0">AUS – nur lokale Ollama-KI</option>
+  </select></label>
+  <label>xKiro-API-Schlüssel<input type="password" class="sin mono" name="XKIRO_API_KEY" placeholder="sk-xt-…" autocomplete="new-password"></label>
+  <label>xKiro-Modell<input class="sin mono" name="XKIRO_MODEL" list="xkiroModels" placeholder="openai/gpt-5.6-sol"></label>
+  <datalist id="xkiroModels"></datalist>
+  <div class="row"><button type="button" class="btn sm" onclick="loadXkiroModels()">XKIRO-MODELLE LADEN</button></div>
+  <label>xKiro Reasoning<select class="sin" name="XKIRO_REASONING_EFFORT">
+   <option value="">Modell-Standard</option><option value="none">none</option><option value="low">low</option>
+   <option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option>
   </select></label>
   <label>Anthropic-API-Schlüssel für Claude<input type="password" class="sin mono" name="ANTHROPIC_API_KEY" placeholder="sk-ant-…" autocomplete="new-password"></label>
   <div class="empty">Claude verarbeitet Anfragen in der Cloud und nutzt dein API-Guthaben. Schlüssel bleiben auf diesem PC. Ein Claude-Chat-Abo ersetzt den API-Zugang nicht.</div>
@@ -305,11 +321,11 @@ paintSpeak();
 async function poll(){
   let s;try{s=await api('/api/state?since='+feedSince)}catch(e){return}
   serverVoice=s.voice;$('#model').textContent=s.model+(s.vision?' + '+s.vision:'');
-  const o=s.llm||s.ollama||{};$('#providerName').textContent=s.provider==='claude'?'Claude':'Lokale KI';
+  const o=s.llm||s.ollama||{};$('#providerName').textContent=s.provider==='xkiro'?'xKiro':s.provider==='claude'?'Claude':'Lokale KI';
   $('#ki').textContent=!o.ok?'OFFLINE':o.model_ok?'BEREIT':'MODELL FEHLT';
   $('#ki').style.color=o.ok&&o.model_ok?'var(--ok)':'var(--bad)';
   $('#kiMsg').textContent=o.ok&&o.model_ok?s.model:(o.msg||'');
-  $('#costMsg').textContent=s.provider==='claude'?`Heute ca. $${Number(s.usage.cost_usd).toFixed(3)} · Tageslimit ${s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit'}`:'Lokale KI: keine API-Gebühren';
+  $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):'Lokale KI: keine API-Gebühren';
   $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
   $('#skl').textContent=s.skills;
   $('#mem').textContent=s.memory_count;$('#vox').textContent=s.voice?'WHISPER':'BROWSER';
@@ -354,12 +370,20 @@ async function toggleStop(){const on=!notausOn;if(!on&&!confirm('NOTAUS aufheben
 function openSetup(){const f=$('#setup form');
   f.OWNER_NAME.value=CFG.name||'Marvin';f.OWNER_TITLE.value=CFG.title||'Sir';f.OWNER_INFO.value=CFG.info||'';
   f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
-  f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
+  f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.JARVIS_CLOUD_ENABLED.value=CFG.cloud_enabled===false?'0':'1';
+  f.XKIRO_MODEL.value=CFG.xkiro_model||'openai/gpt-5.6-sol';f.XKIRO_REASONING_EFFORT.value=CFG.xkiro_reasoning||'';
+  f.XKIRO_API_KEY.value='';f.XKIRO_API_KEY.placeholder=CFG.xkiro_key_set?'(gesetzt – leer lassen = behalten)':'sk-xt-…';
+  f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
   f.CLAUDE_DAILY_BUDGET_USD.value=CFG.claude_budget??1;
   f.ANTHROPIC_API_KEY.value='';f.ANTHROPIC_API_KEY.placeholder=CFG.claude_key_set?'(gesetzt – leer lassen = behalten)':'sk-ant-…';
   f.TELEGRAM_BOT_TOKEN.placeholder=CFG.telegram?'(gesetzt – leer lassen = behalten)':'123456789:ABC…';
   $('#login').style.display='none';$('#setup').style.display='block'}
 function closeSetup(){$('#setup').style.display='none';if(CFG.needs_setup&&!started)boot()}
+async function loadXkiroModels(){toast('xKiro-Modellkatalog wird geladen …');
+ try{const r=await fetch('/api/xkiro-models',{headers:{'Authorization':'Bearer '+TOKEN,'X-Jarvis':'1'}});const j=await r.json();
+  if(!r.ok)throw new Error(j.error||'Katalog nicht erreichbar');
+  $('#xkiroModels').innerHTML=(j.models||[]).map(m=>'<option value="'+esc(m)+'"></option>').join('');
+  toast((j.models||[]).length+' xKiro-Modelle geladen.')}catch(e){toast(e.message)}}
 async function checkAI(){toast('KI-Verbindung wird getestet …');
  try{const j=await api('/api/check',{method:'POST'});toast(j.provider+': '+j.reply);poll()}
  catch(e){toast(e.message)}}
@@ -375,7 +399,7 @@ async function doSetup(e){e.preventDefault();const body=Object.fromEntries(new F
   const saveButton=e.target.querySelector('button[type="submit"],button:not([type])');saveButton.disabled=true;
   try{
   const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1'},body:JSON.stringify(body)});
-  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));await boot();poll()}
+  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
   else{let m='Speichern fehlgeschlagen';try{m=(await r.json()).error||m}catch(_){}toast(m)}
   }catch(err){toast('Speichern fehlgeschlagen: '+err.message)}finally{saveButton.disabled=false}}
 boot();
