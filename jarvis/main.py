@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from . import autopilot, claude, config, telegram_bot
+from . import autopilot, claude, config, telegram_bot, xkiro
 from .web import app
 
 OLLAMA_STATUS = config.OLLAMA_STATUS  # gemeinsam genutzt (auch wenn als __main__ gestartet)
@@ -112,8 +112,11 @@ async def main():
 
 
 async def check_provider(start_if_needed=False):
-    if config.active_provider() == "claude":
+    provider = config.active_provider()
+    if provider == "claude":
         return await claude.check()
+    if provider == "xkiro":
+        return await xkiro.check()
     return await check_ollama(start_if_needed=start_if_needed)
 
 
