@@ -2,7 +2,7 @@
 import asyncio
 import traceback
 
-from . import brain, config, db, prompts
+from . import agents, brain, config, db, prompts
 from .tools import next_daily, notify
 
 _busy = asyncio.Lock()
@@ -15,9 +15,20 @@ async def run_mission_cycle(m: dict):
     ctx = {"channel": f"mission:{m['id']}", "mission_id": m["id"], "mission_updated": False}
     db.ex("UPDATE missions SET cycles=cycles+1, next_run=? WHERE id=?",
           (db.now() + config.MISSION_INTERVAL_MIN * 60, m["id"]))
-    messages = [{"role": "user", "content": prompts.mission_prompt(m, log, approvals)}]
+    mission_text = prompts.mission_prompt(m, log, approvals)
+    messages = [{"role": "user", "content": mission_text}]
     try:
-        text = await brain.think(messages, ctx, max_steps=config.MISSION_MAX_STEPS)
+        council_context = ""
+        if agents.mission_review_due(m.get("cycles", 0)):
+            try:
+                council_context = await agents.council(
+                    f"Autonome Jarvis-Mission: {m.get('title', '')}\nZiel: {m.get('goal', '')}\n"
+                    f"Nächster Schritt: {m.get('next_step', '')}\n\n{mission_text[:6000]}"
+                )
+            except Exception:
+                council_context = ""
+        text = await brain.think(messages, ctx, extra_system=council_context,
+                                 max_steps=config.MISSION_MAX_STEPS)
     except brain.BudgetExceeded as e:
         db.ex("INSERT INTO mission_log(mission_id,ts,entry) VALUES(?,?,?)", (m["id"], db.now(), str(e)))
         db.ex("UPDATE missions SET next_run=? WHERE id=?", (next_daily("00:05"), m["id"]))
