@@ -31,7 +31,7 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'windows/install.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
           if ($parseErrors.Count) { $parseErrors | Format-List; exit 1 }
   download:
-    needs: tests
+    needs: [tests, browser]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,3 +44,22 @@ jobs:
           name: JARVIS_READY
           path: dist/JARVIS_READY.zip
           retention-days: 30
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt
+      - run: npm install --prefix .browser-check playwright@1.56.1
+      - run: .browser-check/node_modules/.bin/playwright install --with-deps chromium
+      - run: node tests/browser.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jarvis-browser-check
+          path: dist/browser-check/
