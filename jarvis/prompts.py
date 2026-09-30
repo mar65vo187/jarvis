@@ -34,7 +34,7 @@ def capabilities() -> str:
                     "Dateiwerkzeuge nur im Workspace")
         caps.append("PowerShell (shell) – riskante Befehle holen automatisch eine Freigabe ein")
         if pc.AVAILABLE:
-            see = "screenshot (sehen" + (", mit Claude/Seh-Modell)" if config.VISION_MODEL or config.active_provider() == "claude" else " – ohne Seh-Modell nur eingeschränkt)")
+            see = "screenshot (sehen" + (", mit Cloud-/Seh-Modell)" if config.VISION_MODEL or config.active_provider() in ("claude", "xkiro") else " – ohne Seh-Modell nur eingeschränkt)")
             caps.append(f"PC-STEUERUNG: {see}, click/type_text/press_keys/scroll/drag (bedienen), "
                         "open (Programme/Dateien/URLs), windows, clipboard, system_status")
     else:
