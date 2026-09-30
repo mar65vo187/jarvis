@@ -47,6 +47,12 @@ class AgentCouncil(unittest.TestCase):
             self.assertFalse(agents.should_use_council("Hallo Jarvis"))
             self.assertTrue(agents.should_use_council("Analysiere die Architektur und optimiere mein GitHub-System."))
 
+    def test_mission_review_is_periodic(self):
+        with patch.object(config, "AGENTS_ENABLED", True), patch.object(config, "AGENT_MISSION_EVERY", 4):
+            self.assertTrue(agents.mission_review_due(0))
+            self.assertFalse(agents.mission_review_due(1))
+            self.assertTrue(agents.mission_review_due(4))
+
     def test_premium_models_are_filtered_by_default(self):
         with patch.object(config, "AGENT_ALLOW_PREMIUM", False),              patch.object(config, "AGENT_PREFER_FREE", False):
             ranked = agents.rank_models(agents.SPECS["engineer"], CATALOG)
