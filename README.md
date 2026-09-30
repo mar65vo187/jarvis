@@ -3,9 +3,10 @@
 Persönlicher Assistent mit deutschem Dashboard, Werkzeugen, SQLite-Gedächtnis,
 Missionen, Zeitplänen, optionaler PC-Steuerung und Telegram-Kopplung.
 
-**Claude ist eingebaut:** Text, Werkzeugaufrufe und Bildanalyse über die offizielle
-Anthropic Messages API. Ollama bleibt als lokaler Anbieter verfügbar. Das
-Dashboard zeigt den tatsächlichen KI-Status und einen Verbindungstest.
+**Drei KI-Wege sind eingebaut:** xKiro als Multi-Modell-Gateway, Claude direkt über
+die Anthropic Messages API und Ollama für vollständig lokale Inferenz. Das Dashboard
+zeigt den tatsächlichen KI-Status, kann den aktuellen xKiro-Modellkatalog laden und
+hat einen Cloud-Sperrschalter für reinen Offline-/Lokalbetrieb.
 
 ## Windows 10/11
 
@@ -41,12 +42,16 @@ Für Windows-PC-Steuerung zusätzlich `requirements-windows.txt` installieren.
 
 | Einstellung | Verhalten |
 |---|---|
-| `JARVIS_PROVIDER=claude` | Claude; API-Schlüssel erforderlich |
+| `JARVIS_PROVIDER=xkiro` | xKiro; Modell-ID im Format `anbieter/modell` |
+| `JARVIS_PROVIDER=claude` | Claude direkt; Anthropic-API-Schlüssel erforderlich |
 | `JARVIS_PROVIDER=ollama` | Lokales Ollama-Modell erforderlich |
-| `JARVIS_PROVIDER=auto` | Claude mit Schlüssel, sonst Ollama |
+| `JARVIS_PROVIDER=auto` | xKiro mit Schlüssel, sonst Claude, sonst Ollama |
+| `JARVIS_CLOUD_ENABLED=0` | Harte Cloud-Sperre; erzwingt Ollama |
 
 Keine automatische Wiederholung bereits ausgeführter Aufgaben mit einem anderen
-Anbieter. Modell und Anbieter lassen sich im Dashboard ändern. Die standardmäßige
+Anbieter. Modell und Anbieter lassen sich im Dashboard ändern. Für xKiro wird der
+Modellkatalog live über `/v1/models` geladen; API-Schlüssel werden ausschließlich
+lokal in der Jarvis-`.env` gespeichert. Die standardmäßige
 Claude-Kostenschätzung nutzt ein Tageslimit von 1 USD; Details in `.env.example`.
 Sie ersetzt kein Abrechnungslimit beim Anbieter. Bei Modellwechsel Preise anpassen.
 
