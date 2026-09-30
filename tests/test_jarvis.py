@@ -54,7 +54,8 @@ class Basics(unittest.TestCase):
         html = (ROOT / "hud" / "index.html").read_text(encoding="utf-8")
         self.assertEqual(html.lower().count("</html>"), 1)
         self.assertEqual(html.lower().count("</script>"), 1)
-        for needle in ("XKIRO_API_KEY", "XKIRO_MODEL", "JARVIS_CLOUD_ENABLED", "XKIRO-MODELLE LADEN"):
+        for needle in ("XKIRO_API_KEY", "XKIRO_MODEL", "JARVIS_CLOUD_ENABLED", "XKIRO-MODELLE LADEN",
+                       "JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_MODE", "JARVIS_AGENT_MAX_AGENTS", "Agentenrat"):
             self.assertIn(needle, html)
 
     def test_full_access_paths(self):
