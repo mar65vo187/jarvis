@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from . import claude, config, db, prompts
+from . import claude, config, db, prompts, xkiro
 from .tools import all_schemas, run_tool
 
 
@@ -36,8 +36,11 @@ def _ollama_tools() -> list[dict]:
 
 async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
                 model: str | None = None) -> dict:
-    if config.active_provider() == "claude":
+    provider = config.active_provider()
+    if provider == "claude":
         return await claude.call(messages, tools=tools, max_tokens=max_tokens, model=model)
+    if provider == "xkiro":
+        return await xkiro.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     return await _ollama_call(messages, tools, max_tokens, model)
 
 
@@ -109,14 +112,15 @@ VISION_PROMPT = (
 
 async def describe_image(b64: str, w: int = 0, h: int = 0, question: str = "") -> str:
     """Lässt das optionale lokale Seh-Modell ein Bild beschreiben. Ohne Seh-Modell: ehrlicher Hinweis."""
-    is_claude = config.active_provider() == "claude"
-    if not is_claude and not config.VISION_MODEL:
+    provider = config.active_provider()
+    if provider == "ollama" and not config.VISION_MODEL:
         return ("[Bild vorhanden, aber kein Seh-Modell eingerichtet. Ohne JARVIS_VISION_MODEL kann ich den Inhalt "
                 "nicht sehen – nutze stattdessen windows/clipboard/PowerShell oder bitte den Owner.]")
     prompt = VISION_PROMPT.format(w=w or "?", h=h or "?") + (f"\nZusatzfrage: {question}" if question else "")
+    vision_model = config.CLAUDE_MODEL if provider == "claude" else config.XKIRO_MODEL if provider == "xkiro" else config.VISION_MODEL
     try:
         resp = await _call([{"role": "user", "content": prompt, "images": [b64]}], tools=None,
-                           max_tokens=1200, model=config.CLAUDE_MODEL if is_claude else config.VISION_MODEL)
+                           max_tokens=1200, model=vision_model)
         return "[Bildanalyse]\n" + ((resp.get("message") or {}).get("content") or "").strip()
     except Exception as e:
         return f"[Bildanalyse fehlgeschlagen: {e}]"
@@ -149,8 +153,13 @@ def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
     """Hält Systemprompt + Werkzeuge + Verlauf im Kontextfenster (wichtig bei wenig RAM / kleinem num_ctx).
     Reihenfolge: alte Werkzeug-Ergebnisse kürzen → älteste Nachrichten entfernen. Systemprompt und
     die aktuelle Anfrage bleiben immer erhalten."""
-    ctx = config.CLAUDE_NUM_CTX if config.active_provider() == "claude" else config.NUM_CTX
-    output = config.CLAUDE_MAX_TOKENS if config.active_provider() == "claude" else config.MAX_TOKENS
+    provider = config.active_provider()
+    if provider == "claude":
+        ctx, output = config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS
+    elif provider == "xkiro":
+        ctx, output = config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS
+    else:
+        ctx, output = config.NUM_CTX, config.MAX_TOKENS
     budget = ctx - min(output, ctx // 3) - _est_tokens(tools)
     if _est_tokens(msgs) <= budget:
         return msgs
