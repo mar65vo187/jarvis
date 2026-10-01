@@ -77,7 +77,8 @@ def validate_values(values: dict):
         raise ValueError("XKIRO_REASONING_EFFORT ist ungültig.")
     for key in ("JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM",
                 "JARVIS_AGENT_USE_XKIRO", "JARVIS_AGENT_USE_HF", "JARVIS_AGENT_USE_OLLAMA",
-                "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY"):
+                "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY",
+                "JARVIS_ADAPTIVE_THINK", "JARVIS_PERFORMANCE_TUNE"):
         if key in values and values[key] not in ("0", "1"):
             raise ValueError(f"{key} muss 0 oder 1 sein.")
     if "JARVIS_PRIVACY" in values and values["JARVIS_PRIVACY"] not in ("smart", "strikt"):
@@ -90,7 +91,12 @@ def validate_values(values: dict):
     for key, lo, hi in (("JARVIS_AGENT_MAX_AGENTS", 1, 8), ("JARVIS_AGENT_MAX_PARALLEL", 1, 6),
                         ("JARVIS_AGENT_MAX_TOKENS", 256, 4096), ("JARVIS_AGENT_MODEL_FALLBACKS", 1, 5),
                         ("JARVIS_AGENT_MISSION_EVERY", 1, 20), ("JARVIS_UPGRADE_INTERVAL_HOURS", 1, 168),
-                        ("JARVIS_UPGRADE_MAX_CHILDREN", 1, 50), ("JARVIS_UPGRADE_BENCH_TASKS", 1, 4)):
+                        ("JARVIS_UPGRADE_MAX_CHILDREN", 1, 50), ("JARVIS_UPGRADE_BENCH_TASKS", 1, 4),
+                        ("JARVIS_PERFORMANCE_TUNE_INTERVAL_MIN", 5, 1440),
+                        ("JARVIS_FAST_MAX_TOKENS", 128, 4096), ("JARVIS_BALANCED_MAX_TOKENS", 256, 4096),
+                        ("JARVIS_DEEP_MAX_TOKENS", 512, 8192),
+                        ("JARVIS_FAST_TARGET_MS", 100, 120000), ("JARVIS_BALANCED_TARGET_MS", 100, 180000),
+                        ("JARVIS_DEEP_TARGET_MS", 100, 900000)):
         if key in values:
             try:
                 n = int(values[key])
@@ -206,6 +212,16 @@ def reload():
     g["UPGRADE_INTERVAL_HOURS"] = max(1, min(168, _int("JARVIS_UPGRADE_INTERVAL_HOURS", 24)))
     g["UPGRADE_MAX_CHILDREN"] = max(1, min(50, _int("JARVIS_UPGRADE_MAX_CHILDREN", 12)))
     g["UPGRADE_BENCH_TASKS"] = max(1, min(4, _int("JARVIS_UPGRADE_BENCH_TASKS", 2)))
+    # --- Adaptive Brain: schnelle Routineantworten, mehr Denkbudget nur bei komplexen Aufgaben ---
+    g["ADAPTIVE_THINK"] = _env("JARVIS_ADAPTIVE_THINK", "1") == "1"
+    g["PERFORMANCE_TUNE"] = _env("JARVIS_PERFORMANCE_TUNE", "1") == "1"
+    g["PERFORMANCE_TUNE_INTERVAL_MIN"] = max(5, min(1440, _int("JARVIS_PERFORMANCE_TUNE_INTERVAL_MIN", 30)))
+    g["FAST_MAX_TOKENS"] = max(128, min(4096, _int("JARVIS_FAST_MAX_TOKENS", 700)))
+    g["BALANCED_MAX_TOKENS"] = max(256, min(4096, _int("JARVIS_BALANCED_MAX_TOKENS", 1600)))
+    g["DEEP_MAX_TOKENS"] = max(512, min(8192, _int("JARVIS_DEEP_MAX_TOKENS", 3000)))
+    g["FAST_TARGET_MS"] = max(100, min(120000, _int("JARVIS_FAST_TARGET_MS", 3500)))
+    g["BALANCED_TARGET_MS"] = max(100, min(180000, _int("JARVIS_BALANCED_TARGET_MS", 9000)))
+    g["DEEP_TARGET_MS"] = max(100, min(900000, _int("JARVIS_DEEP_TARGET_MS", 30000)))
     g["ANTHROPIC_API_KEY"] = _env("ANTHROPIC_API_KEY") or _env("CLAUDE_API_KEY")
     g["CLAUDE_MODEL"] = _env("CLAUDE_MODEL") or "claude-sonnet-5-5"
     g["CLAUDE_TIMEOUT_SEC"] = max(10, _int("CLAUDE_TIMEOUT_SEC", 180))
@@ -239,11 +255,23 @@ def reload():
                      "JARVIS_UPGRADE_FREE_ONLY": "1" if g["UPGRADE_FREE_ONLY"] else "0",
                      "JARVIS_UPGRADE_INTERVAL_HOURS": str(g["UPGRADE_INTERVAL_HOURS"]),
                      "JARVIS_UPGRADE_MAX_CHILDREN": str(g["UPGRADE_MAX_CHILDREN"]),
-                     "JARVIS_UPGRADE_BENCH_TASKS": str(g["UPGRADE_BENCH_TASKS"])})
+                     "JARVIS_UPGRADE_BENCH_TASKS": str(g["UPGRADE_BENCH_TASKS"]),
+                     "JARVIS_ADAPTIVE_THINK": "1" if g["ADAPTIVE_THINK"] else "0",
+                     "JARVIS_PERFORMANCE_TUNE": "1" if g["PERFORMANCE_TUNE"] else "0",
+                     "JARVIS_PERFORMANCE_TUNE_INTERVAL_MIN": str(g["PERFORMANCE_TUNE_INTERVAL_MIN"]),
+                     "JARVIS_FAST_MAX_TOKENS": str(g["FAST_MAX_TOKENS"]),
+                     "JARVIS_BALANCED_MAX_TOKENS": str(g["BALANCED_MAX_TOKENS"]),
+                     "JARVIS_DEEP_MAX_TOKENS": str(g["DEEP_MAX_TOKENS"]),
+                     "JARVIS_FAST_TARGET_MS": str(g["FAST_TARGET_MS"]),
+                     "JARVIS_BALANCED_TARGET_MS": str(g["BALANCED_TARGET_MS"]),
+                     "JARVIS_DEEP_TARGET_MS": str(g["DEEP_TARGET_MS"])})
     # --- Lokales Gehirn (Ollama) ---
     g["OLLAMA_BASE_URL"] = _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"], "OLLAMA_BASE_URL": g["OLLAMA_BASE_URL"]})
     g["MODEL"] = _env("JARVIS_MODEL") or "qwen3:8b"
+    # Optional getrennte Modelle: klein/schnell für Routine, stärker für tiefe Aufgaben.
+    g["FAST_MODEL"] = _env("JARVIS_FAST_MODEL") or g["MODEL"]
+    g["DEEP_MODEL"] = _env("JARVIS_DEEP_MODEL") or g["MODEL"]
     # Optionales Seh-Modell für Screenshots/Fotos (z.B. qwen3-vl:4b). Leer = aus.
     g["VISION_MODEL"] = _env("JARVIS_VISION_MODEL", "")
     # qwen3 & Co.: Denkmodus kostet lokal viel Zeit – standardmäßig aus.

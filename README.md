@@ -51,9 +51,21 @@ Ein Upgrade läuft als:
 Der Candidate wird nur aktiviert, wenn er den Parent im Benchmark ausreichend
 schlägt. Generation, Eltern-Agent, Score und Status werden in SQLite gespeichert.
 Schlechtere Candidates werden verworfen; bei zu vielen Child-Agenten werden
-schwächere Profile archiviert. Automatische Upgrades laufen standardmäßig einmal
-pro 24 Stunden und verwenden dafür nur kostenlose/lokale Modelle, sofern verfügbar.
-Über Dashboard oder Telegram `/upgrade` kann ein Lauf manuell gestartet werden.
+schwächere Profile archiviert. Auf dem Oracle-Server laufen automatische Upgrades
+standardmäßig alle 6 Stunden. Zusätzlich bewertet Jarvis jetzt nicht nur Qualität,
+sondern auch die Laufzeit: ein geringfügig besserer Candidate wird nicht aktiviert,
+wenn er deutlich langsamer ist. Über Dashboard oder Telegram `/upgrade` kann ein Lauf
+manuell gestartet werden.
+
+## Adaptive Brain: mehr Denken nur wenn es sich lohnt
+
+Jarvis klassifiziert lokale Aufgaben ohne zusätzlichen KI-Aufruf als **FAST**,
+**BALANCED** oder **DEEP**. FAST nutzt ein kleines Modell ohne Denkmodus und ein
+kleines Antwortbudget. DEEP nutzt das stärkere lokale Modell, aktiviert den
+Denkmodus und bekommt mehr Tokens. Gemessene Latenz und Zuverlässigkeit werden nur
+als aggregierte Zähler in SQLite gespeichert; Prompt-Inhalte landen nicht in den
+Performance-Metriken. Das Auto-Tuning kann daraus die schnellste zuverlässige
+Fast-Route und die robusteste Deep-Route auswählen.
 
 ## Windows 10/11
 
@@ -199,6 +211,9 @@ Ausführliche Einrichtung: [ANLEITUNG.md](ANLEITUNG.md).
 
 Oracle stellt dauerhaft kostenlos einen ARM-Server bereit (laut Oracle-Doku 2026: 2 OCPU + 12 GB RAM).
 Darauf laufen Jarvis, die lokale KI (Ollama) und tägliche verschlüsselte Backups.
+Bei genügend RAM/CPU hält der Installer zwei lokale Modelle gleichzeitig warm:
+ein kleines Fast-Modell für Routine und ein stärkeres Deep-Modell für komplexe
+Aufgaben. Ollama darf dann zwei Anfragen parallel verarbeiten.
 
 1. **Tailscale** (kostenlos): Konto anlegen, App auf Handy und PC installieren,
    Admin → *Settings → Keys* → **Auth key** erzeugen, Admin → *DNS* → **HTTPS Certificates** einschalten.

@@ -76,18 +76,27 @@ say "Python-Umgebung …"
   || warn "Zusatzpakete (Sprache/Excel) nicht vollständig – Jarvis läuft trotzdem."
 
 # ---------------------------------------------------------------- Ollama (lokale KI auf dem Server)
+RAM_GB=$(awk '/MemTotal/ {printf "%d", $2/1024/1024 + 0.5}' /proc/meminfo)
+CPU_COUNT=$(nproc 2>/dev/null || echo 1)
+if [ "$RAM_GB" -ge 20 ] && [ "$CPU_COUNT" -ge 4 ]; then
+  OLLAMA_PARALLEL=2
+  OLLAMA_LOADED=2
+else
+  OLLAMA_PARALLEL=1
+  OLLAMA_LOADED=1
+fi
 if ! command -v ollama >/dev/null 2>&1; then
   say "Installiere Ollama …"
   curl -fsSL https://ollama.com/install.sh | sh >>"$LOG" 2>&1
 fi
 mkdir -p /etc/systemd/system/ollama.service.d
-cat > /etc/systemd/system/ollama.service.d/jarvis.conf <<'EOF'
+cat > /etc/systemd/system/ollama.service.d/jarvis.conf <<EOF
 [Service]
 Environment="OLLAMA_HOST=127.0.0.1:11434"
 Environment="OLLAMA_FLASH_ATTENTION=1"
 Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
-Environment="OLLAMA_NUM_PARALLEL=1"
-Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="OLLAMA_NUM_PARALLEL=$OLLAMA_PARALLEL"
+Environment="OLLAMA_MAX_LOADED_MODELS=$OLLAMA_LOADED"
 Environment="OLLAMA_KEEP_ALIVE=-1"
 EOF
 systemctl daemon-reload
@@ -95,7 +104,6 @@ systemctl enable --now ollama >>"$LOG" 2>&1
 systemctl restart ollama
 for i in $(seq 1 30); do curl -fs http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 1; done
 
-RAM_GB=$(awk '/MemTotal/ {printf "%d", $2/1024/1024 + 0.5}' /proc/meminfo)
 if [ -n "${JARVIS_MODEL:-}" ]; then MODEL="$JARVIS_MODEL"
 elif [ "$RAM_GB" -ge 20 ]; then MODEL="qwen3:8b"
 elif [ "$RAM_GB" -ge 5 ];  then MODEL="qwen3:4b-instruct-2507-q4_K_M"
@@ -103,8 +111,18 @@ else MODEL="qwen3:1.7b"; fi
 if [ -f "$ENVF" ] && [ -z "${JARVIS_MODEL:-}" ]; then
   OLD=$(grep -E '^JARVIS_MODEL=' "$ENVF" | cut -d= -f2- || true); [ -n "$OLD" ] && MODEL="$OLD"
 fi
-say "RAM ${RAM_GB} GB → KI-Modell $MODEL (Download einmalig, mehrere GB) …"
-ollama pull "$MODEL" >>"$LOG" 2>&1 || { echo "Modell-Download fehlgeschlagen, siehe $LOG"; exit 1; }
+if [ -n "${JARVIS_FAST_MODEL:-}" ]; then FAST_MODEL="$JARVIS_FAST_MODEL"
+elif [ "$RAM_GB" -ge 20 ]; then FAST_MODEL="qwen3:4b-instruct-2507-q4_K_M"
+elif [ "$RAM_GB" -ge 5 ]; then FAST_MODEL="qwen3:1.7b"
+else FAST_MODEL="$MODEL"; fi
+DEEP_MODEL="${JARVIS_DEEP_MODEL:-$MODEL}"
+say "RAM ${RAM_GB} GB / CPU ${CPU_COUNT} → Balance $MODEL | Fast $FAST_MODEL | Deep $DEEP_MODEL | parallel $OLLAMA_PARALLEL …"
+for M in "$MODEL" "$FAST_MODEL" "$DEEP_MODEL"; do
+  [ -n "$M" ] || continue
+  if ! ollama list | awk 'NR>1 {print $1}' | grep -Fxq "$M"; then
+    ollama pull "$M" >>"$LOG" 2>&1 || { echo "Modell-Download $M fehlgeschlagen, siehe $LOG"; exit 1; }
+  fi
+done
 
 # ---------------------------------------------------------------- Zugang: privat (Tailscale) oder öffentlich (HTTPS)
 ACCESS="public"
@@ -178,6 +196,13 @@ PY
 }
 [ -f "$ENVF" ] || cp "$APP/.env.example" "$ENVF"
 setv JARVIS_MODEL "$MODEL"
+setv JARVIS_FAST_MODEL "$FAST_MODEL"
+setv JARVIS_DEEP_MODEL "$DEEP_MODEL"
+setv JARVIS_ADAPTIVE_THINK "1"
+setv JARVIS_PERFORMANCE_TUNE "1"
+setv JARVIS_PERFORMANCE_TUNE_INTERVAL_MIN "30"
+setv JARVIS_UPGRADE_AUTO "1"
+setv JARVIS_UPGRADE_INTERVAL_HOURS "6"
 setv OLLAMA_BASE_URL "http://127.0.0.1:11434"
 setv PUBLIC_BASE_URL "$SCHEME://$DOMAIN"
 if [ -n "${JARVIS_PRIVACY:-}" ]; then
@@ -272,8 +297,10 @@ systemctl enable --now jarvis-backup.timer >>"$LOG" 2>&1 || true
   echo "Backup-Passwort: /root/jarvis-backup.pass -> Inhalt sicher aufbewahren!"
 } >> /root/jarvis-zugang.txt
 
-# Modell vorwärmen (erste Antwort sonst langsam)
-curl -fs http://127.0.0.1:11434/api/generate -d "{\"model\":\"$MODEL\",\"prompt\":\"hi\",\"stream\":false,\"keep_alive\":-1,\"options\":{\"num_predict\":1}}" >/dev/null || true
+# Modelle vorwärmen (erste Antwort sonst langsam). Bei genügend RAM bleiben Fast + Deep gleichzeitig geladen.
+for M in "$FAST_MODEL" "$DEEP_MODEL"; do
+  curl -fs http://127.0.0.1:11434/api/generate -d "{\"model\":\"$M\",\"prompt\":\"hi\",\"stream\":false,\"keep_alive\":-1,\"options\":{\"num_predict\":1}}" >/dev/null || true
+done
 
 echo
 echo -e "${C}==================== FERTIG ====================${N}"

@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from . import agents, claude, config, db, huggingface, knowledge, privacy, prompts, xkiro
+from . import agents, claude, config, db, huggingface, knowledge, performance, privacy, prompts, xkiro
 from .errors import BudgetExceeded, CloudUnavailable, PrivacyBlocked
 from .tools import all_schemas, run_tool
 
@@ -71,7 +71,7 @@ async def _call_provider(provider: str, messages, tools=None, max_tokens=None, m
     return await _ollama_call(messages, tools, max_tokens, model)
 
 
-LAST_ROUTE: dict = {"provider": "", "private": False}
+LAST_ROUTE: dict = {"provider": "", "private": False, "profile": "", "latency_ms": 0}
 
 
 def _keep_alive():
@@ -161,22 +161,34 @@ _ollama_lock = asyncio.Lock()
 
 
 async def _ollama_call(messages, tools=None, max_tokens=None, model=None):
+    profile = performance.profile_messages(messages)
+    selected = model or performance.model_for(profile)
+    LAST_ROUTE.update(profile=profile.name)
     async with _ollama_lock:
-        return await _ollama_request(messages, tools, max_tokens, model)
+        try:
+            return await _ollama_request(messages, tools, max_tokens, selected, profile)
+        except RuntimeError as exc:
+            # Adaptive secondary models are optional. Missing/non-tool-capable fast/deep models
+            # must never take Jarvis offline; fall back to the configured balanced model.
+            msg = str(exc).lower()
+            if model is None and selected != config.MODEL and ("fehlt" in msg or "werkzeuge" in msg):
+                return await _ollama_request(messages, tools, max_tokens, config.MODEL, profile)
+            raise
 
 
-async def _ollama_request(messages, tools=None, max_tokens=None, model=None):
+async def _ollama_request(messages, tools=None, max_tokens=None, model=None, profile=None):
     model = model or config.MODEL
+    profile = profile or performance.profile_messages(messages)
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": False,
         "keep_alive": _keep_alive(),
-        "options": {"num_predict": max_tokens or config.MAX_TOKENS, "temperature": config.TEMPERATURE,
+        "options": {"num_predict": max_tokens or profile.max_tokens, "temperature": config.TEMPERATURE,
                     "num_ctx": config.NUM_CTX},
     }
-    if not config.THINK:
-        payload["think"] = False
+    payload["think"] = performance.should_think(profile)
+    started = time.perf_counter()
     if tools:
         payload["tools"] = tools
     delay = 1.0
@@ -186,6 +198,9 @@ async def _ollama_request(messages, tools=None, max_tokens=None, model=None):
                 r = await c.post(f"{config.OLLAMA_BASE_URL}/api/chat", json=payload)
             except httpx.HTTPError:
                 if attempt == 4:
+                    latency = int((time.perf_counter() - started) * 1000)
+                    performance.record(model, profile, False, latency)
+                    LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
                     raise RuntimeError(
                         f"Ollama ist nicht erreichbar unter {config.OLLAMA_BASE_URL}. "
                         "Starte Ollama und führe ggf. 'ollama serve' aus."
@@ -195,6 +210,9 @@ async def _ollama_request(messages, tools=None, max_tokens=None, model=None):
                 continue
             low = r.text.lower()
             if r.status_code >= 500 and ("memory" in low or "alloc" in low):
+                latency = int((time.perf_counter() - started) * 1000)
+                performance.record(model, profile, False, latency)
+                LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
                 raise RuntimeError(
                     "Zu wenig freier Arbeitsspeicher für das KI-Modell. Schließe große Programme (Browser-Tabs, Spiele) "
                     f"und versuch es nochmal. Details: {r.text[:200]}")
@@ -203,15 +221,27 @@ async def _ollama_request(messages, tools=None, max_tokens=None, model=None):
                 delay = min(delay * 2, 8)
                 continue
             if r.status_code == 404:
+                latency = int((time.perf_counter() - started) * 1000)
+                performance.record(model, profile, False, latency)
+                LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
                 raise RuntimeError(f"Ollama-Modell '{model}' fehlt. Bitte 'ollama pull {model}' ausführen.")
             if r.status_code == 400 and "think" in payload and "think" in r.text.lower():
                 payload.pop("think", None)  # Modell ohne Denkmodus-Schalter
                 continue
             if r.status_code == 400 and tools and "does not support tools" in r.text:
+                latency = int((time.perf_counter() - started) * 1000)
+                performance.record(model, profile, False, latency)
+                LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
                 raise RuntimeError(f"Das Modell '{model}' kann keine Werkzeuge benutzen. "
                                    "Bitte ein Tool-fähiges Modell wählen (z.B. qwen3:8b).")
             if r.status_code >= 400:
+                latency = int((time.perf_counter() - started) * 1000)
+                performance.record(model, profile, False, latency)
+                LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
                 raise RuntimeError(f"Ollama API {r.status_code}: {r.text[:500]}")
+            latency = int((time.perf_counter() - started) * 1000)
+            performance.record(model, profile, True, latency)
+            LAST_ROUTE.update(profile=profile.name, latency_ms=latency)
             return r.json()
     raise RuntimeError("Ollama ist nicht erreichbar.")
 

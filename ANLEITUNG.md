@@ -127,8 +127,9 @@ Ablauf:
 8. Schlechtere Candidates werden verworfen; alte schwächere Children können
    archiviert werden.
 
-Standardmäßig läuft ein Auto-Upgrade höchstens alle 24 Stunden und verwendet nur
-kostenlose/lokale Modelle, sofern verfügbar. Manuell geht es über den Dashboard-
+Auf dem Oracle-Server läuft ein Auto-Upgrade standardmäßig alle 6 Stunden und
+verwendet nur kostenlose/lokale Modelle, sofern verfügbar. Kandidaten müssen neben
+Qualität auch eine Laufzeit-Schranke bestehen. Manuell geht es über den Dashboard-
 Button **AGENT-UPGRADE STARTEN** oder Telegram:
 
 `/upgrade`
@@ -139,6 +140,15 @@ Optional:
 `/upgrade research`
 `/upgrade business`
 `/upgrade general`
+
+
+### Adaptive Brain
+
+Auf dem Server kann Jarvis automatisch zwischen einem kleinen schnellen Modell und
+einem stärkeren Deep-Modell wechseln. Einfache Aufgaben laufen ohne Denkmodus;
+komplexe Aufgaben bekommen automatisch mehr Denkbudget. Die Auswahl wird aus
+lokalen Erfolgs-/Latenzmetriken nachjustiert, ohne Gesprächsinhalte in diesen
+Metriken zu speichern.
 
 ## 8. Telegram
 

@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS model_metrics(
   source TEXT, model TEXT, successes INTEGER DEFAULT 0, failures INTEGER DEFAULT 0,
   total_latency_ms INTEGER DEFAULT 0, last_used REAL DEFAULT 0,
   PRIMARY KEY(source,model));
+CREATE TABLE IF NOT EXISTS runtime_metrics(
+  profile TEXT, model TEXT, calls INTEGER DEFAULT 0, successes INTEGER DEFAULT 0, failures INTEGER DEFAULT 0,
+  total_latency_ms INTEGER DEFAULT 0, last_used REAL DEFAULT 0,
+  PRIMARY KEY(profile,model));
 CREATE TABLE IF NOT EXISTS agent_profiles(
   id INTEGER PRIMARY KEY, key TEXT UNIQUE, name TEXT, mission TEXT, vendors_json TEXT DEFAULT '[]',
   reasoning INTEGER DEFAULT 1, web_search INTEGER DEFAULT 0, task_type TEXT DEFAULT 'general',

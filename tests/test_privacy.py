@@ -290,6 +290,10 @@ class DeployFiles(unittest.TestCase):
         self.assertNotIn("0.0.0.0", inst)
         upd = (ROOT / "deploy" / "oracle" / "update.sh").read_text(encoding="utf-8")
         self.assertIn('reset --hard "$OLD"', upd)
+        self.assertIn("JARVIS_ADAPTIVE_THINK", upd)
+        self.assertIn("JARVIS_PERFORMANCE_TUNE", upd)
+        self.assertIn("JARVIS_UPGRADE_INTERVAL_HOURS=24", upd)
+        self.assertIn("OLLAMA_NUM_PARALLEL=$OLLAMA_PARALLEL", upd)
         bk = (ROOT / "deploy" / "oracle" / "backup.sh").read_text(encoding="utf-8")
         self.assertIn("openssl enc -aes-256-cbc -pbkdf2", bk)
         self.assertIn("--exclude=jarvis.key", bk)  # Schlüssel nie im selben Backup
