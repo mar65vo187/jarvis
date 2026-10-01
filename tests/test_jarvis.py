@@ -55,7 +55,10 @@ class Basics(unittest.TestCase):
         self.assertEqual(html.lower().count("</html>"), 1)
         self.assertEqual(html.lower().count("</script>"), 1)
         for needle in ("XKIRO_API_KEY", "XKIRO_MODEL", "JARVIS_CLOUD_ENABLED", "XKIRO-MODELLE LADEN",
-                       "JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_MODE", "JARVIS_AGENT_MAX_AGENTS", "Agentenrat"):
+                       "HF_TOKEN", "HF_MODEL", "HF-MODELLE LADEN",
+                       "JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_MODE", "JARVIS_AGENT_MAX_AGENTS",
+                       "JARVIS_AGENT_USE_OLLAMA", "JARVIS_AGENT_USE_HF",
+                       "JARVIS_UPGRADE_AUTO", "AGENT-UPGRADE STARTEN", "Agentenrat"):
             self.assertIn(needle, html)
 
     def test_full_access_paths(self):
