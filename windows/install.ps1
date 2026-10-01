@@ -20,7 +20,7 @@ Write-Host ""
 
 # ------------------------------------------------------------------ laufenden Jarvis stoppen (Update)
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*Jarvis.pyw*" } |
+    Where-Object { $_.CommandLine -like "*Jarvis.pyw*" -or $_.CommandLine -like "*Jarvis-Watchdog.pyw*" } |
     ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 # Alte Admin-Version (geplanter Task) entfernen, falls vorhanden - ohne Fehler, wenn es ihn nicht gibt.
 try { schtasks.exe /Query /TN "JARVIS" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { schtasks.exe /Delete /TN "JARVIS" /F 2>$null | Out-Null } } catch {}
@@ -273,7 +273,7 @@ Say "Richte Autostart (nur dein Benutzer) ein ..."
 $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 # Achtung: New-Item -Force auf einen bestehenden Schluessel wuerde ALLE anderen Autostart-Eintraege loeschen.
 if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey | Out-Null }
-$RunValue = '"' + $Pyw + '" "' + (Join-Path $Target "Jarvis.pyw") + '" --tray'
+$RunValue = '"' + $Pyw + '" "' + (Join-Path $Target "Jarvis-Watchdog.pyw") + '"'
 New-ItemProperty -Path $RunKey -Name "JARVIS" -Value $RunValue -PropertyType String -Force | Out-Null
 
 Say "Erstelle Desktop- und Startmenue-Icon ..."
