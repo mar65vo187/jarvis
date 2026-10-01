@@ -11,7 +11,7 @@ import traceback
 
 import httpx
 
-from . import autopilot, brain, config, db, guard, voice
+from . import agents, autopilot, brain, config, db, guard, upgrades, voice
 from .tools import NOTIFY_HOOKS
 
 
@@ -57,7 +57,7 @@ async def _try_pair(msg: dict) -> bool:
 HELP = ("Schreib oder sprich einfach mit mir.\n\n"
         "/status – Lage\n/missionen – alle Missionen\n/log <id> – Missionslog\n"
         "/pause <id> · /weiter <id> · /stopp <id>\n/ja <id> [notiz] · /nein <id> [notiz]\n"
-        "/plan – geplante Aufgaben\n/skills – selbstgebaute Fähigkeiten\n/screenshot – was ist am PC los\n"
+        "/plan – geplante Aufgaben\n/skills – selbstgebaute Fähigkeiten\n/agenten – Agentenrat & Child-Agenten\n/upgrade – neuen Child-Agent benchmarken\n/screenshot – was ist am PC los\n"
         "/notaus – sofort ALLES stoppen · /weiter – NOTAUS aufheben\n/neu – Gespräch neu beginnen")
 
 def _api_url() -> str:
@@ -111,7 +111,10 @@ async def _notify_hook(text: str, approval_id: int | None = None):
 
 def _status_text() -> str:
     ms = db.q("SELECT * FROM missions WHERE status IN ('active','paused') ORDER BY id")
+    ag = agents.public_state()
+    up = upgrades.status()
     lines = [f"🤖 JARVIS online | {config.active_provider()} | {config.active_model()}" + (f" | Sehen: {config.VISION_MODEL}" if config.VISION_MODEL else ""),
+             f"🧠 Agentenrat: {str(ag.get('mode','auto')).upper()} | {ag.get('custom_agents',0)} Child | Evolution: {up.get('children',0)} aktiv",
              "🛑 NOTAUS AKTIV – /weiter zum Aufheben" if guard.stopped() else "✅ Alle Systeme frei", ""]
     if ms:
         lines.append("🎯 Missionen:")
@@ -143,6 +146,17 @@ async def _command(chat_id: int, text: str) -> bool:
     elif cmd == "/skills":
         from .tools import skill_list
         await send(chat_id, await skill_list())
+    elif cmd == "/agenten":
+        ag, up = agents.public_state(), upgrades.status()
+        src = ", ".join(k for k,v in (ag.get("sources") or {}).items() if v) or "keine"
+        children = db.q("SELECT name,task_type,generation,score FROM agent_profiles WHERE status='active' ORDER BY score DESC LIMIT 12")
+        lines = [f"🧠 Agentenrat {str(ag.get('mode','auto')).upper()} | Quellen: {src}",
+                 f"Child-Agenten: {up.get('children',0)} | Auto-Upgrade: {'AN' if up.get('auto') else 'AUS'}"]
+        lines += [f"• {x['name']} · {x['task_type']} · Gen {x['generation']} · Score {x['score']:.1f}" for x in children]
+        await send(chat_id, "\n".join(lines))
+    elif cmd == "/upgrade":
+        await send(chat_id, "🧬 Starte Agent-Factory + Benchmark …")
+        await send(chat_id, await upgrades.run_cycle(focus=(arg if arg in ('code','research','business','general') else 'auto'), manual=True))
     elif cmd == "/screenshot":
         from . import pc
         if not pc.AVAILABLE:
@@ -290,7 +304,8 @@ async def _handle(update: dict):
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
             seen = ""
-            if kind == "photo" and (config.VISION_MODEL or config.active_provider() == "claude"):
+            if kind == "photo" and (config.VISION_MODEL or config.active_provider() in ("claude", "xkiro") or
+                                    (config.active_provider() == "huggingface" and config.HF_VISION_MODEL)):
                 seen = "\n" + await brain.describe_image(base64.b64encode(data).decode(), question=text)
             text = (f"[{config.OWNER_NAME} hat eine Datei geschickt: {p}]{seen}\n"
                     f"{text or 'Schau sie dir an und sag mir, was du damit machen würdest.'}")
@@ -334,6 +349,8 @@ async def _run_once():
             {"command": "missionen", "description": "Alle Missionen"},
             {"command": "plan", "description": "Geplante Aufgaben"},
             {"command": "skills", "description": "Selbstgebaute Fähigkeiten"},
+            {"command": "agenten", "description": "Agentenrat & Child-Agenten"},
+            {"command": "upgrade", "description": "Neuen Child-Agent benchmarken"},
             {"command": "screenshot", "description": "Bildschirm vom PC"},
             {"command": "notaus", "description": "Sofort alles stoppen"},
             {"command": "weiter", "description": "NOTAUS aufheben"},
@@ -349,6 +366,7 @@ async def _run_once():
         try:
             updates = await api("getUpdates", offset=offset, timeout=50,
                                 allowed_updates=["message", "callback_query"])
+            db.set_setting("telegram_last_poll", str(time.time()))
             for u in updates:
                 offset = u["update_id"] + 1
                 db.set_setting("telegram_update_offset", str(offset))
