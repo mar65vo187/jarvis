@@ -67,20 +67,23 @@ def save_env(values: dict):
 
 
 def validate_values(values: dict):
-    if values.get("JARVIS_PROVIDER", "auto") not in ("auto", "xkiro", "claude", "ollama"):
-        raise ValueError("KI-Anbieter muss auto, xkiro, claude oder ollama sein.")
+    if values.get("JARVIS_PROVIDER", "auto") not in ("auto", "xkiro", "huggingface", "claude", "ollama"):
+        raise ValueError("KI-Anbieter muss auto, xkiro, huggingface, claude oder ollama sein.")
     if "JARVIS_CLOUD_ENABLED" in values and values["JARVIS_CLOUD_ENABLED"] not in ("0", "1"):
         raise ValueError("JARVIS_CLOUD_ENABLED muss 0 oder 1 sein.")
     if "XKIRO_REASONING_EFFORT" in values and values["XKIRO_REASONING_EFFORT"] not in ("", "none", "low", "medium", "high", "xhigh", "max"):
         raise ValueError("XKIRO_REASONING_EFFORT ist ungültig.")
-    for key in ("JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM"):
+    for key in ("JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM",
+                "JARVIS_AGENT_USE_XKIRO", "JARVIS_AGENT_USE_HF", "JARVIS_AGENT_USE_OLLAMA",
+                "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY"):
         if key in values and values[key] not in ("0", "1"):
             raise ValueError(f"{key} muss 0 oder 1 sein.")
     if "JARVIS_AGENT_MODE" in values and values["JARVIS_AGENT_MODE"] not in ("off", "auto", "always"):
         raise ValueError("JARVIS_AGENT_MODE muss off, auto oder always sein.")
     for key, lo, hi in (("JARVIS_AGENT_MAX_AGENTS", 1, 8), ("JARVIS_AGENT_MAX_PARALLEL", 1, 6),
                         ("JARVIS_AGENT_MAX_TOKENS", 256, 4096), ("JARVIS_AGENT_MODEL_FALLBACKS", 1, 5),
-                        ("JARVIS_AGENT_MISSION_EVERY", 1, 20)):
+                        ("JARVIS_AGENT_MISSION_EVERY", 1, 20), ("JARVIS_UPGRADE_INTERVAL_HOURS", 1, 168),
+                        ("JARVIS_UPGRADE_MAX_CHILDREN", 1, 50), ("JARVIS_UPGRADE_BENCH_TASKS", 1, 4)):
         if key in values:
             try:
                 n = int(values[key])
@@ -112,10 +115,12 @@ def active_provider() -> str:
     if PROVIDER == "auto":
         if CLOUD_ENABLED and XKIRO_API_KEY:
             return "xkiro"
+        if CLOUD_ENABLED and HF_TOKEN:
+            return "huggingface"
         if CLOUD_ENABLED and ANTHROPIC_API_KEY:
             return "claude"
         return "ollama"
-    if PROVIDER in ("xkiro", "claude") and not CLOUD_ENABLED:
+    if PROVIDER in ("xkiro", "huggingface", "claude") and not CLOUD_ENABLED:
         return "ollama"
     return PROVIDER
 
@@ -124,6 +129,8 @@ def active_model() -> str:
     provider = active_provider()
     if provider == "xkiro":
         return XKIRO_MODEL
+    if provider == "huggingface":
+        return HF_MODEL
     if provider == "claude":
         return CLAUDE_MODEL
     return MODEL
@@ -159,7 +166,15 @@ def reload():
     g["XKIRO_NUM_CTX"] = max(4096, _int("XKIRO_NUM_CTX", 200000))
     g["XKIRO_MAX_TOKENS"] = max(256, _int("XKIRO_MAX_TOKENS", 4096))
     g["XKIRO_REASONING_EFFORT"] = _env("XKIRO_REASONING_EFFORT")
-    # --- Multi-Agentenrat: spezialisierte Cloud-Modelle beraten den Master-Jarvis ---
+    # --- Hugging Face Inference Providers (OpenAI-kompatibler Router) ---
+    g["HF_TOKEN"] = _env("HF_TOKEN") or _env("HUGGINGFACE_TOKEN")
+    g["HF_BASE_URL"] = "https://router.huggingface.co/v1"
+    g["HF_MODEL"] = _env("HF_MODEL") or "openai/gpt-oss-120b"
+    g["HF_POLICY"] = _env("HF_POLICY", "cheapest")
+    g["HF_TIMEOUT_SEC"] = max(10, _int("HF_TIMEOUT_SEC", 120))
+    g["HF_NUM_CTX"] = max(4096, _int("HF_NUM_CTX", 128000))
+    g["HF_MAX_TOKENS"] = max(256, _int("HF_MAX_TOKENS", 4096))
+    # --- Multi-Agentenrat: spezialisierte Modelle beraten den Master-Jarvis ---
     g["AGENTS_ENABLED"] = _env("JARVIS_AGENTS_ENABLED", "1") == "1"
     g["AGENT_MODE"] = _env("JARVIS_AGENT_MODE", "auto") or "auto"
     g["AGENT_MAX_AGENTS"] = max(1, min(8, _int("JARVIS_AGENT_MAX_AGENTS", 5)))
@@ -169,6 +184,15 @@ def reload():
     g["AGENT_MISSION_EVERY"] = max(1, min(20, _int("JARVIS_AGENT_MISSION_EVERY", 4)))
     g["AGENT_PREFER_FREE"] = _env("JARVIS_AGENT_PREFER_FREE", "1") == "1"
     g["AGENT_ALLOW_PREMIUM"] = _env("JARVIS_AGENT_ALLOW_PREMIUM", "0") == "1"
+    g["AGENT_USE_XKIRO"] = _env("JARVIS_AGENT_USE_XKIRO", "1") == "1"
+    g["AGENT_USE_HF"] = _env("JARVIS_AGENT_USE_HF", "1") == "1"
+    g["AGENT_USE_OLLAMA"] = _env("JARVIS_AGENT_USE_OLLAMA", "1") == "1"
+    # --- Agent Factory / Upgrade-System ---
+    g["UPGRADE_AUTO"] = _env("JARVIS_UPGRADE_AUTO", "1") == "1"
+    g["UPGRADE_FREE_ONLY"] = _env("JARVIS_UPGRADE_FREE_ONLY", "1") == "1"
+    g["UPGRADE_INTERVAL_HOURS"] = max(1, min(168, _int("JARVIS_UPGRADE_INTERVAL_HOURS", 24)))
+    g["UPGRADE_MAX_CHILDREN"] = max(1, min(50, _int("JARVIS_UPGRADE_MAX_CHILDREN", 12)))
+    g["UPGRADE_BENCH_TASKS"] = max(1, min(4, _int("JARVIS_UPGRADE_BENCH_TASKS", 2)))
     g["ANTHROPIC_API_KEY"] = _env("ANTHROPIC_API_KEY") or _env("CLAUDE_API_KEY")
     g["CLAUDE_MODEL"] = _env("CLAUDE_MODEL") or "claude-sonnet-5-5"
     g["CLAUDE_TIMEOUT_SEC"] = max(10, _int("CLAUDE_TIMEOUT_SEC", 180))
@@ -185,7 +209,15 @@ def reload():
                      "JARVIS_AGENT_MODEL_FALLBACKS": str(g["AGENT_MODEL_FALLBACKS"]),
                      "JARVIS_AGENT_MISSION_EVERY": str(g["AGENT_MISSION_EVERY"]),
                      "JARVIS_AGENT_PREFER_FREE": "1" if g["AGENT_PREFER_FREE"] else "0",
-                     "JARVIS_AGENT_ALLOW_PREMIUM": "1" if g["AGENT_ALLOW_PREMIUM"] else "0"})
+                     "JARVIS_AGENT_ALLOW_PREMIUM": "1" if g["AGENT_ALLOW_PREMIUM"] else "0",
+                     "JARVIS_AGENT_USE_XKIRO": "1" if g["AGENT_USE_XKIRO"] else "0",
+                     "JARVIS_AGENT_USE_HF": "1" if g["AGENT_USE_HF"] else "0",
+                     "JARVIS_AGENT_USE_OLLAMA": "1" if g["AGENT_USE_OLLAMA"] else "0",
+                     "JARVIS_UPGRADE_AUTO": "1" if g["UPGRADE_AUTO"] else "0",
+                     "JARVIS_UPGRADE_FREE_ONLY": "1" if g["UPGRADE_FREE_ONLY"] else "0",
+                     "JARVIS_UPGRADE_INTERVAL_HOURS": str(g["UPGRADE_INTERVAL_HOURS"]),
+                     "JARVIS_UPGRADE_MAX_CHILDREN": str(g["UPGRADE_MAX_CHILDREN"]),
+                     "JARVIS_UPGRADE_BENCH_TASKS": str(g["UPGRADE_BENCH_TASKS"])})
     # --- Lokales Gehirn (Ollama) ---
     g["OLLAMA_BASE_URL"] = _env("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"], "OLLAMA_BASE_URL": g["OLLAMA_BASE_URL"]})
@@ -276,6 +308,7 @@ TELEGRAM_ALLOWED_USER_IDS: set = set()
 OLLAMA_STATUS: dict = {"ok": False, "model_ok": False, "vision_ok": False, "msg": "prüfe …", "checked": 0.0}
 CLAUDE_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0}
 XKIRO_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0, "usage": ""}
+HF_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0}
 reload()
 
 HOME = Path.home()
