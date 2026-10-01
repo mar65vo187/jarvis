@@ -34,8 +34,20 @@ def _token() -> str:
     return hashlib.sha256(f"jarvis::{config.JARVIS_PASSWORD}".encode()).hexdigest()
 
 
+def _runtime_provider() -> str:
+    if config.PROVIDER == "auto" and brain.LAST_PROVIDER.get("provider"):
+        return str(brain.LAST_PROVIDER["provider"])
+    return config.active_provider()
+
+
+def _runtime_model() -> str:
+    if config.PROVIDER == "auto" and brain.LAST_PROVIDER.get("model"):
+        return str(brain.LAST_PROVIDER["model"])
+    return config.active_model()
+
+
 def _provider_status():
-    provider = config.active_provider()
+    provider = _runtime_provider()
     if provider == "claude":
         return config.CLAUDE_STATUS
     if provider == "xkiro":
@@ -154,11 +166,13 @@ async def state(req: Request):
     from . import guard, telegram_bot
     status = _provider_status()
     return JSONResponse({
-        "model": config.active_model(),
-        "vision": ("Claude Vision" if config.active_provider() == "claude" else
-                   "xKiro Vision" if config.active_provider() == "xkiro" else
-                   (config.HF_VISION_MODEL or "") if config.active_provider() == "huggingface" else config.VISION_MODEL),
-        "provider": config.active_provider(),
+        "model": _runtime_model(),
+        "vision": ("Claude Vision" if _runtime_provider() == "claude" else
+                   "xKiro Vision" if _runtime_provider() == "xkiro" else
+                   (config.HF_VISION_MODEL or "") if _runtime_provider() == "huggingface" else config.VISION_MODEL),
+        "provider": _runtime_provider(),
+        "configured_provider": config.PROVIDER,
+        "failover_error": brain.LAST_PROVIDER.get("error", ""),
         "llm": {k: v for k, v in status.items() if k != "checked"},
         "usage": {"cost_usd": db.cost_today(), "budget_usd": config.DAILY_BUDGET_USD if config.active_provider() == "claude" else 0,
                   "provider_usage": status.get("usage", "")},
@@ -342,8 +356,10 @@ async def notaus(req: Request):
 
 async def health(req):
     status = _provider_status()
-    return JSONResponse({"ok": True, "app": "jarvis", "version": "2.0.0", "provider": config.active_provider(),
-                         "ai_ready": bool(status.get("ok") and status.get("model_ok"))})
+    return JSONResponse({"ok": True, "app": "jarvis", "version": "2.1.0", "provider": _runtime_provider(),
+                         "configured_provider": config.PROVIDER,
+                         "ai_ready": bool(status.get("ok") and status.get("model_ok")),
+                         "runtime_model": _runtime_model()})
 
 
 async def bad_request(req, exc):
