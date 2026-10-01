@@ -20,7 +20,7 @@ Write-Host ""
 
 # ------------------------------------------------------------------ laufenden Jarvis stoppen (Update)
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like "*Jarvis.pyw*" } |
+    Where-Object { $_.CommandLine -like "*Jarvis.pyw*" -or $_.CommandLine -like "*Jarvis-Watchdog.pyw*" } |
     ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 # Alte Admin-Version (geplanter Task) entfernen, falls vorhanden - ohne Fehler, wenn es ihn nicht gibt.
 try { schtasks.exe /Query /TN "JARVIS" 2>$null | Out-Null; if ($LASTEXITCODE -eq 0) { schtasks.exe /Delete /TN "JARVIS" /F 2>$null | Out-Null } } catch {}
@@ -107,15 +107,17 @@ if (Test-Path $EnvFile) {
 $Provider = $Existing["JARVIS_PROVIDER"]
 if (-not $Provider) {
     Write-Host ""
-    $choice = Read-Host "  KI waehlen: xKiro Multi-Modell, Claude direkt oder lokale KI/Ollama? [X/c/l]"
+    $choice = Read-Host "  KI waehlen: xKiro, Hugging Face, Claude oder lokale KI/Ollama? [X/h/c/l]"
     if ($choice -match '^[lL]') { $Provider = "ollama" }
     elseif ($choice -match '^[cC]') { $Provider = "claude" }
+    elseif ($choice -match '^[hH]') { $Provider = "huggingface" }
     else { $Provider = "xkiro" }
 }
 $CloudEnabled = if ($Existing.ContainsKey("JARVIS_CLOUD_ENABLED")) { $Existing["JARVIS_CLOUD_ENABLED"] -ne "0" } else { $true }
 $HasXKiroKey = $Existing["XKIRO_API_KEY"] -or $env:XKIRO_API_KEY
+$HasHFKey = $Existing["HF_TOKEN"] -or $env:HF_TOKEN -or $env:HUGGINGFACE_TOKEN
 $HasClaudeKey = $Existing["ANTHROPIC_API_KEY"] -or $env:ANTHROPIC_API_KEY -or $env:CLAUDE_API_KEY
-$UseLocal = (-not $CloudEnabled) -or ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasXKiroKey -and -not $HasClaudeKey)
+$UseLocal = (-not $CloudEnabled) -or ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasXKiroKey -and -not $HasHFKey -and -not $HasClaudeKey)
 $Model = if ($Existing["JARVIS_MODEL"] -and $Existing["JARVIS_MODEL"] -notmatch '^claude') { $Existing["JARVIS_MODEL"] } else { "qwen3:8b" }
 $VisionSet = $Existing["JARVIS_VISION_MODEL"]
 $Tune = [ordered]@{}
@@ -273,7 +275,7 @@ Say "Richte Autostart (nur dein Benutzer) ein ..."
 $RunKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 # Achtung: New-Item -Force auf einen bestehenden Schluessel wuerde ALLE anderen Autostart-Eintraege loeschen.
 if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey | Out-Null }
-$RunValue = '"' + $Pyw + '" "' + (Join-Path $Target "Jarvis.pyw") + '" --tray'
+$RunValue = '"' + $Pyw + '" "' + (Join-Path $Target "Jarvis-Watchdog.pyw") + '"'
 New-ItemProperty -Path $RunKey -Name "JARVIS" -Value $RunValue -PropertyType String -Force | Out-Null
 
 Say "Erstelle Desktop- und Startmenue-Icon ..."
@@ -296,11 +298,13 @@ $ok = $LASTEXITCODE
 Pop-Location
 if ($ok -ne 0) { throw "Selbsttest fehlgeschlagen - Log oben pruefen." }
 
-Say "Starte Jarvis ..."
+Say "Starte Jarvis + Watchdog ..."
+Start-Process -FilePath $Pyw -ArgumentList ('"' + (Join-Path $Target "Jarvis-Watchdog.pyw") + '"') -WorkingDirectory $Target
+Start-Sleep -Milliseconds 500
 Start-Process -FilePath $Pyw -ArgumentList ('"' + (Join-Path $Target "Jarvis-Oeffnen.pyw") + '"') -WorkingDirectory $Target
 
 Write-Host ""
-Write-Host "  FERTIG. Jarvis ($Provider) ist gestartet und startet ab jetzt mit Windows." -ForegroundColor Green
+Write-Host "  FERTIG. Jarvis ($Provider) ist gestartet; der Watchdog startet ihn bei einem Absturz neu." -ForegroundColor Green
 Write-Host "  Im Fenster: KI-Zugang speichern -> KI-VERBINDUNG TESTEN. Telegram ist optional."
 Write-Host "  Oeffnen: Desktop-Icon JARVIS oder Strg+Alt+J."
 Write-Host ""

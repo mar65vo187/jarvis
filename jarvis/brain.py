@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from . import agents, claude, config, db, prompts, xkiro
+from . import agents, claude, config, db, huggingface, prompts, xkiro
 from .tools import all_schemas, run_tool
 
 
@@ -34,14 +34,58 @@ def _ollama_tools() -> list[dict]:
     return out
 
 
-async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
-                model: str | None = None) -> dict:
-    provider = config.active_provider()
+LAST_PROVIDER = {"provider": "", "model": "", "error": ""}
+
+
+def _provider_chain() -> list[str]:
+    """Configured failover chain. Only used when JARVIS_PROVIDER=auto."""
+    if not config.CLOUD_ENABLED:
+        return ["ollama"]
+    chain = []
+    if config.XKIRO_API_KEY:
+        chain.append("xkiro")
+    if config.HF_TOKEN:
+        chain.append("huggingface")
+    if config.ANTHROPIC_API_KEY:
+        chain.append("claude")
+    chain.append("ollama")
+    return chain
+
+
+async def _call_provider(provider: str, messages, tools=None, max_tokens=None, model=None):
     if provider == "claude":
         return await claude.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     if provider == "xkiro":
         return await xkiro.call(messages, tools=tools, max_tokens=max_tokens, model=model)
+    if provider == "huggingface":
+        return await huggingface.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     return await _ollama_call(messages, tools, max_tokens, model)
+
+
+async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
+                model: str | None = None) -> dict:
+    # An explicit model belongs to the selected provider (e.g. vision); never send
+    # that provider-specific ID to a different API. Normal master calls in AUTO
+    # mode are safe to fail over because a failed model request has not executed
+    # Jarvis side effects. Tool results already in the history are merely continued.
+    providers = [config.active_provider()]
+    if config.PROVIDER == "auto" and model is None:
+        providers = _provider_chain()
+    errors = []
+    for provider in providers:
+        try:
+            result = await _call_provider(provider, messages, tools, max_tokens, model)
+            runtime_model = (config.XKIRO_MODEL if provider == "xkiro" else
+                             config.HF_MODEL if provider == "huggingface" else
+                             config.CLAUDE_MODEL if provider == "claude" else config.MODEL)
+            LAST_PROVIDER.update(provider=provider, model=runtime_model, error="")
+            return result
+        except Exception as exc:
+            errors.append(f"{provider}: {str(exc)[:220]}")
+            LAST_PROVIDER.update(provider=provider, model="", error=str(exc)[:300])
+            if config.PROVIDER != "auto" or model is not None:
+                raise
+    raise RuntimeError("Alle konfigurierten KI-Wege sind fehlgeschlagen: " + " | ".join(errors))
 
 
 _ollama_lock = asyncio.Lock()
@@ -116,8 +160,13 @@ async def describe_image(b64: str, w: int = 0, h: int = 0, question: str = "") -
     if provider == "ollama" and not config.VISION_MODEL:
         return ("[Bild vorhanden, aber kein Seh-Modell eingerichtet. Ohne JARVIS_VISION_MODEL kann ich den Inhalt "
                 "nicht sehen – nutze stattdessen windows/clipboard/PowerShell oder bitte den Owner.]")
+    if provider == "huggingface" and not config.HF_VISION_MODEL:
+        return ("[Bild vorhanden, aber für Hugging Face ist kein HF_VISION_MODEL eingerichtet. "
+                "Wähle ein VLM oder nutze xKiro/Claude bzw. ein lokales Seh-Modell.]")
     prompt = VISION_PROMPT.format(w=w or "?", h=h or "?") + (f"\nZusatzfrage: {question}" if question else "")
-    vision_model = config.CLAUDE_MODEL if provider == "claude" else config.XKIRO_MODEL if provider == "xkiro" else config.VISION_MODEL
+    vision_model = (config.CLAUDE_MODEL if provider == "claude" else
+                    config.XKIRO_MODEL if provider == "xkiro" else
+                    config.HF_VISION_MODEL if provider == "huggingface" else config.VISION_MODEL)
     try:
         resp = await _call([{"role": "user", "content": prompt, "images": [b64]}], tools=None,
                            max_tokens=1200, model=vision_model)
@@ -154,10 +203,24 @@ def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
     Reihenfolge: alte Werkzeug-Ergebnisse kürzen → älteste Nachrichten entfernen. Systemprompt und
     die aktuelle Anfrage bleiben immer erhalten."""
     provider = config.active_provider()
-    if provider == "claude":
+    if config.PROVIDER == "auto":
+        # AUTO promises failover, so fit to the smallest configured fallback
+        # instead of preparing a 200k cloud context that local Ollama cannot accept.
+        windows = [(config.NUM_CTX, config.MAX_TOKENS)]
+        if config.XKIRO_API_KEY:
+            windows.append((config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS))
+        if config.HF_TOKEN:
+            windows.append((config.HF_NUM_CTX, config.HF_MAX_TOKENS))
+        if config.ANTHROPIC_API_KEY:
+            windows.append((config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS))
+        ctx = min(x[0] for x in windows)
+        output = min(x[1] for x in windows)
+    elif provider == "claude":
         ctx, output = config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS
     elif provider == "xkiro":
         ctx, output = config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS
+    elif provider == "huggingface":
+        ctx, output = config.HF_NUM_CTX, config.HF_MAX_TOKENS
     else:
         ctx, output = config.NUM_CTX, config.MAX_TOKENS
     budget = ctx - min(output, ctx // 3) - _est_tokens(tools)

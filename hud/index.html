@@ -123,13 +123,14 @@ textarea.sin{font-family:inherit;resize:vertical}
   <label>Anrede<input class="sin" name="OWNER_TITLE" value="Sir"></label>
   <label>Über dich / dein Business (Jarvis arbeitet damit)<textarea class="sin" name="OWNER_INFO" rows="3"></textarea></label>
   <label>KI-Anbieter<select class="sin" name="JARVIS_PROVIDER">
-   <option value="auto">Automatisch: xKiro → Claude → Ollama</option>
-   <option value="xkiro">xKiro (viele Cloud-Modelle)</option>
+   <option value="auto">Automatisch: xKiro → Hugging Face → Claude → Ollama</option>
+   <option value="xkiro">xKiro (Multi-Modell-Gateway)</option>
+   <option value="huggingface">Hugging Face Inference Providers</option>
    <option value="claude">Claude (Anthropic API)</option>
    <option value="ollama">Ollama (lokal)</option>
   </select></label>
   <label>Cloud-KI<select class="sin" name="JARVIS_CLOUD_ENABLED">
-   <option value="1">AN – xKiro/Claude erlaubt</option>
+   <option value="1">AN – xKiro/Hugging Face/Claude erlaubt</option>
    <option value="0">AUS – nur lokale Ollama-KI</option>
   </select></label>
   <label>xKiro-API-Schlüssel<input type="password" class="sin mono" name="XKIRO_API_KEY" placeholder="sk-xt-…" autocomplete="new-password"></label>
@@ -140,6 +141,12 @@ textarea.sin{font-family:inherit;resize:vertical}
    <option value="">Modell-Standard</option><option value="none">none</option><option value="low">low</option>
    <option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option>
   </select></label>
+  <label>Hugging-Face-Token<input type="password" class="sin mono" name="HF_TOKEN" placeholder="hf_…" autocomplete="new-password"></label>
+  <label>Hugging-Face-Modell<input class="sin mono" name="HF_MODEL" list="hfModels" placeholder="openai/gpt-oss-120b"></label>
+  <datalist id="hfModels"></datalist>
+  <div class="row"><button type="button" class="btn sm" onclick="loadHFModels()">HF-MODELLE LADEN</button></div>
+  <label>HF Routing<select class="sin" name="HF_POLICY"><option value="cheapest">cheapest</option><option value="fastest">fastest</option><option value="preferred">preferred</option></select></label>
+  <label>HF Seh-Modell (optional)<input class="sin mono" name="HF_VISION_MODEL" placeholder="VLM-Modell-ID"></label>
   <details open><summary style="cursor:pointer;color:var(--cyan2)">Multi-Agenten-Rat</summary>
    <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
     <div class="empty">Spezialisten beraten parallel. Nur Master-Jarvis darf Werkzeuge/PC-Aktionen ausführen.</div>
@@ -151,6 +158,15 @@ textarea.sin{font-family:inherit;resize:vertical}
     <label>Parallel laufende Spezialisten<input type="number" min="1" max="6" class="sin" name="JARVIS_AGENT_MAX_PARALLEL" value="4"></label>
     <label>Kostenpräferenz<select class="sin" name="JARVIS_AGENT_PREFER_FREE"><option value="1">Kostenlose Modelle bevorzugen</option><option value="0">Qualität vor Preis</option></select></label>
     <label>Premium-Modelle<select class="sin" name="JARVIS_AGENT_ALLOW_PREMIUM"><option value="0">NICHT verwenden</option><option value="1">Erlauben</option></select></label>
+    <label>Agentenquelle xKiro<select class="sin" name="JARVIS_AGENT_USE_XKIRO"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Agentenquelle Hugging Face<select class="sin" name="JARVIS_AGENT_USE_HF"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Agentenquelle Ollama<select class="sin" name="JARVIS_AGENT_USE_OLLAMA"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <hr style="border-color:rgba(56,212,255,.18);width:100%">
+    <div class="empty">Upgrade-System erzeugt Child-Agenten, benchmarked sie und aktiviert nur bessere Varianten.</div>
+    <label>Auto-Upgrades<select class="sin" name="JARVIS_UPGRADE_AUTO"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Auto-Upgrades nur kostenlos/lokal<select class="sin" name="JARVIS_UPGRADE_FREE_ONLY"><option value="1">JA</option><option value="0">NEIN</option></select></label>
+    <label>Upgrade-Intervall (Stunden)<input type="number" min="1" max="168" class="sin" name="JARVIS_UPGRADE_INTERVAL_HOURS" value="24"></label>
+    <label>Max. aktive Child-Agenten<input type="number" min="1" max="50" class="sin" name="JARVIS_UPGRADE_MAX_CHILDREN" value="12"></label>
    </div>
   </details>
   <label>Anthropic-API-Schlüssel für Claude<input type="password" class="sin mono" name="ANTHROPIC_API_KEY" placeholder="sk-ant-…" autocomplete="new-password"></label>
@@ -214,6 +230,9 @@ textarea.sin{font-family:inherit;resize:vertical}
       <div class="kpi"><span>Eigene Skills</span><b class="mono" id="skl">–</b></div>
       <div class="kpi"><span>Agentenrat</span><b class="mono" id="ags">–</b></div>
       <div class="s mono" id="agtMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
+      <div class="kpi"><span>Evolution</span><b class="mono" id="evo">–</b></div>
+      <div class="s mono" id="evoMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
+      <button class="btn sm" type="button" onclick="runUpgrade()">AGENT-UPGRADE STARTEN</button>
       <div class="kpi"><span>Gedächtnis</span><b class="mono" id="mem">–</b></div>
       <div class="kpi"><span>Spracheingabe</span><b class="mono" id="vox">–</b></div>
       <div class="kpi"><span>Telegram</span><b class="mono" id="tgs">–</b></div>
@@ -336,16 +355,18 @@ paintSpeak();
 async function poll(){
   let s;try{s=await api('/api/state?since='+feedSince)}catch(e){return}
   serverVoice=s.voice;$('#model').textContent=s.model+(s.vision?' + '+s.vision:'');
-  const o=s.llm||s.ollama||{};$('#providerName').textContent=s.provider==='xkiro'?'xKiro':s.provider==='claude'?'Claude':'Lokale KI';
+  const o=s.llm||s.ollama||{};$('#providerName').textContent=s.provider==='xkiro'?'xKiro':s.provider==='huggingface'?'Hugging Face':s.provider==='claude'?'Claude':'Lokale KI';
   $('#ki').textContent=!o.ok?'OFFLINE':o.model_ok?'BEREIT':'MODELL FEHLT';
   $('#ki').style.color=o.ok&&o.model_ok?'var(--ok)':'var(--bad)';
   $('#kiMsg').textContent=o.ok&&o.model_ok?s.model:(o.msg||'');
-  $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):'Lokale KI: keine API-Gebühren';
+  $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):s.provider==='huggingface'?'HF Inference Providers':'Lokale KI: keine API-Gebühren';
   $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
   $('#skl').textContent=s.skills;
   const ag=s.agents||{},last=ag.last||{},okAgents=(last.agents||[]).filter(x=>x.ok);
   $('#ags').textContent=!ag.enabled?'AUS':String(ag.mode||'auto').toUpperCase();
-  $('#agtMsg').textContent=last.used?(okAgents.length+' Spezialisten · '+okAgents.map(x=>x.model).join(' · ')):(ag.enabled?'bereit · '+(ag.roles||[]).length+' Rollen':'');
+  $('#agtMsg').textContent=last.used?(okAgents.length+' Spezialisten · '+okAgents.map(x=>(x.source?x.source+':':'')+x.model).join(' · ')):(ag.enabled?'bereit · '+(ag.roles||[]).length+' Rollen · '+(ag.custom_agents||0)+' Child':'');
+  const up=s.upgrades||{},ul=up.last||{};$('#evo').textContent=up.running?'LÄUFT':String(up.children||0)+' CHILD';
+  $('#evoMsg').textContent=ul.status?(String(ul.status).toUpperCase()+' · '+(ul.details||'')):(up.auto?'Auto alle '+up.interval_hours+'h':'Auto aus');
   $('#mem').textContent=s.memory_count;$('#vox').textContent=s.voice?'WHISPER':'BROWSER';
   $('#pcs').textContent=!s.local?'SERVER':!s.pc?'AUS':s.admin?'ADMIN':'BENUTZER';
   $('#tgs').textContent=!s.telegram?'AUS':s.telegram_paired?'GEKOPPELT':'KOPPELN';
@@ -390,9 +411,14 @@ function openSetup(){const f=$('#setup form');
   f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
   f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.JARVIS_CLOUD_ENABLED.value=CFG.cloud_enabled===false?'0':'1';
   f.XKIRO_MODEL.value=CFG.xkiro_model||'openai/gpt-5.6-sol';f.XKIRO_REASONING_EFFORT.value=CFG.xkiro_reasoning||'';
+  f.HF_MODEL.value=CFG.hf_model||'openai/gpt-oss-120b';f.HF_VISION_MODEL.value=CFG.hf_vision_model||'';f.HF_POLICY.value=CFG.hf_policy||'cheapest';
+  f.HF_TOKEN.value='';f.HF_TOKEN.placeholder=CFG.hf_token_set?'(gesetzt – leer lassen = behalten)':'hf_…';
   f.JARVIS_AGENTS_ENABLED.value=CFG.agents_enabled===false?'0':'1';f.JARVIS_AGENT_MODE.value=CFG.agent_mode||'auto';
   f.JARVIS_AGENT_MAX_AGENTS.value=CFG.agent_max_agents||5;f.JARVIS_AGENT_MAX_PARALLEL.value=CFG.agent_max_parallel||4;
   f.JARVIS_AGENT_PREFER_FREE.value=CFG.agent_prefer_free===false?'0':'1';f.JARVIS_AGENT_ALLOW_PREMIUM.value=CFG.agent_allow_premium?'1':'0';
+  f.JARVIS_AGENT_USE_XKIRO.value=CFG.agent_use_xkiro===false?'0':'1';f.JARVIS_AGENT_USE_HF.value=CFG.agent_use_hf===false?'0':'1';f.JARVIS_AGENT_USE_OLLAMA.value=CFG.agent_use_ollama===false?'0':'1';
+  f.JARVIS_UPGRADE_AUTO.value=CFG.upgrade_auto===false?'0':'1';f.JARVIS_UPGRADE_FREE_ONLY.value=CFG.upgrade_free_only===false?'0':'1';
+  f.JARVIS_UPGRADE_INTERVAL_HOURS.value=CFG.upgrade_interval_hours||24;f.JARVIS_UPGRADE_MAX_CHILDREN.value=CFG.upgrade_max_children||12;
   f.XKIRO_API_KEY.value='';f.XKIRO_API_KEY.placeholder=CFG.xkiro_key_set?'(gesetzt – leer lassen = behalten)':'sk-xt-…';
   f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
   f.CLAUDE_DAILY_BUDGET_USD.value=CFG.claude_budget??1;
@@ -405,6 +431,13 @@ async function loadXkiroModels(){toast('xKiro-Modellkatalog wird geladen …');
   if(!r.ok)throw new Error(j.error||'Katalog nicht erreichbar');
   $('#xkiroModels').innerHTML=(j.models||[]).map(m=>'<option value="'+esc(m)+'"></option>').join('');
   toast((j.models||[]).length+' xKiro-Modelle geladen.')}catch(e){toast(e.message)}}
+async function loadHFModels(){toast('Hugging-Face-Modellkatalog wird geladen …');
+ try{const r=await fetch('/api/hf-models',{headers:{'Authorization':'Bearer '+TOKEN,'X-Jarvis':'1'}});const j=await r.json();
+  if(!r.ok)throw new Error(j.error||'HF-Katalog nicht erreichbar');
+  $('#hfModels').innerHTML=(j.models||[]).map(m=>'<option value="'+esc(m)+'"></option>').join('');
+  toast((j.models||[]).length+' HF-Modelle geladen.')}catch(e){toast(e.message)}}
+async function runUpgrade(){toast('Agent-Upgrade läuft …');
+ try{const j=await api('/api/upgrade',{method:'POST',body:JSON.stringify({focus:'auto'})});toast(j.result);poll()}catch(e){toast(e.message)}}
 async function checkAI(){toast('KI-Verbindung wird getestet …');
  try{const j=await api('/api/check',{method:'POST'});toast(j.provider+': '+j.reply);poll()}
  catch(e){toast(e.message)}}
@@ -420,7 +453,7 @@ async function doSetup(e){e.preventDefault();const body=Object.fromEntries(new F
   const saveButton=e.target.querySelector('button[type="submit"],button:not([type])');saveButton.disabled=true;
   try{
   const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1'},body:JSON.stringify(body)});
-  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
+  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.HF_TOKEN.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
   else{let m='Speichern fehlgeschlagen';try{m=(await r.json()).error||m}catch(_){}toast(m)}
   }catch(err){toast('Speichern fehlgeschlagen: '+err.message)}finally{saveButton.disabled=false}}
 boot();

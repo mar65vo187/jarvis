@@ -13,7 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import agents, autopilot, brain, config, db, pc, voice, xkiro
+from . import agents, autopilot, brain, config, db, huggingface, pc, upgrades, voice, xkiro
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .tools import NOTIFY_HOOKS
@@ -34,12 +34,26 @@ def _token() -> str:
     return hashlib.sha256(f"jarvis::{config.JARVIS_PASSWORD}".encode()).hexdigest()
 
 
+def _runtime_provider() -> str:
+    if config.PROVIDER == "auto" and brain.LAST_PROVIDER.get("provider"):
+        return str(brain.LAST_PROVIDER["provider"])
+    return config.active_provider()
+
+
+def _runtime_model() -> str:
+    if config.PROVIDER == "auto" and brain.LAST_PROVIDER.get("model"):
+        return str(brain.LAST_PROVIDER["model"])
+    return config.active_model()
+
+
 def _provider_status():
-    provider = config.active_provider()
+    provider = _runtime_provider()
     if provider == "claude":
         return config.CLAUDE_STATUS
     if provider == "xkiro":
         return config.XKIRO_STATUS
+    if provider == "huggingface":
+        return config.HF_STATUS
     return config.OLLAMA_STATUS
 
 
@@ -152,9 +166,13 @@ async def state(req: Request):
     from . import guard, telegram_bot
     status = _provider_status()
     return JSONResponse({
-        "model": config.active_model(),
-        "vision": "Claude Vision" if config.active_provider() == "claude" else "xKiro Vision" if config.active_provider() == "xkiro" else config.VISION_MODEL,
-        "provider": config.active_provider(),
+        "model": _runtime_model(),
+        "vision": ("Claude Vision" if _runtime_provider() == "claude" else
+                   "xKiro Vision" if _runtime_provider() == "xkiro" else
+                   (config.HF_VISION_MODEL or "") if _runtime_provider() == "huggingface" else config.VISION_MODEL),
+        "provider": _runtime_provider(),
+        "configured_provider": config.PROVIDER,
+        "failover_error": brain.LAST_PROVIDER.get("error", ""),
         "llm": {k: v for k, v in status.items() if k != "checked"},
         "usage": {"cost_usd": db.cost_today(), "budget_usd": config.DAILY_BUDGET_USD if config.active_provider() == "claude" else 0,
                   "provider_usage": status.get("usage", "")},
@@ -169,6 +187,7 @@ async def state(req: Request):
         "pair_code": telegram_bot.pair_code() if config.TELEGRAM_BOT_TOKEN else "",
         "bot_name": db.get_setting("telegram_bot_name", ""),
         "agents": agents.public_state(),
+        "upgrades": upgrades.status(),
         "missions": missions,
         "approvals": db.q("SELECT id,mission_id,kind,question,details FROM approvals WHERE status='pending' ORDER BY id"),
         "schedules": [{**s, "next_run_fmt": db.fmt_ts(s["next_run"])} for s in
@@ -233,9 +252,15 @@ async def app_config(req: Request):
         "cloud_enabled": config.CLOUD_ENABLED,
         "xkiro_model": config.XKIRO_MODEL, "xkiro_key_set": bool(config.XKIRO_API_KEY),
         "xkiro_reasoning": config.XKIRO_REASONING_EFFORT,
+        "hf_model": config.HF_MODEL, "hf_vision_model": config.HF_VISION_MODEL,
+        "hf_token_set": bool(config.HF_TOKEN), "hf_policy": config.HF_POLICY,
         "agents_enabled": config.AGENTS_ENABLED, "agent_mode": config.AGENT_MODE,
         "agent_max_agents": config.AGENT_MAX_AGENTS, "agent_max_parallel": config.AGENT_MAX_PARALLEL,
         "agent_prefer_free": config.AGENT_PREFER_FREE, "agent_allow_premium": config.AGENT_ALLOW_PREMIUM,
+        "agent_use_xkiro": config.AGENT_USE_XKIRO, "agent_use_hf": config.AGENT_USE_HF,
+        "agent_use_ollama": config.AGENT_USE_OLLAMA,
+        "upgrade_auto": config.UPGRADE_AUTO, "upgrade_free_only": config.UPGRADE_FREE_ONLY,
+        "upgrade_interval_hours": config.UPGRADE_INTERVAL_HOURS, "upgrade_max_children": config.UPGRADE_MAX_CHILDREN,
         "claude_model": config.CLAUDE_MODEL, "claude_key_set": bool(config.ANTHROPIC_API_KEY),
         "claude_budget": config.DAILY_BUDGET_USD,
         "telegram": bool(config.TELEGRAM_BOT_TOKEN), "voice": voice.enabled(),
@@ -246,8 +271,12 @@ SETUP_KEYS = {"TELEGRAM_BOT_TOKEN", "OWNER_NAME", "OWNER_TITLE", "OWNER_INFO", "
               "JARVIS_VISION_MODEL", "WHISPER_MODEL", "N8N_BASE_URL", "N8N_SECRET",
               "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "IMAP_HOST", "STRIPE_SECRET_KEY",
               "JARVIS_PROVIDER", "JARVIS_CLOUD_ENABLED", "XKIRO_API_KEY", "XKIRO_MODEL", "XKIRO_REASONING_EFFORT",
+              "HF_TOKEN", "HF_MODEL", "HF_VISION_MODEL", "HF_POLICY",
               "JARVIS_AGENTS_ENABLED", "JARVIS_AGENT_MODE", "JARVIS_AGENT_MAX_AGENTS", "JARVIS_AGENT_MAX_PARALLEL",
               "JARVIS_AGENT_PREFER_FREE", "JARVIS_AGENT_ALLOW_PREMIUM",
+              "JARVIS_AGENT_USE_XKIRO", "JARVIS_AGENT_USE_HF", "JARVIS_AGENT_USE_OLLAMA",
+              "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY", "JARVIS_UPGRADE_INTERVAL_HOURS",
+              "JARVIS_UPGRADE_MAX_CHILDREN",
               "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD"}
 
 
@@ -282,6 +311,24 @@ async def xkiro_models(req: Request):
         return JSONResponse({"error": str(e)}, status_code=503)
 
 
+async def hf_models(req: Request):
+    if not _is_local(req) and not _authed(req):
+        return _deny()
+    try:
+        return JSONResponse({"models": await huggingface.list_models()})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
+
+
+async def run_upgrade(req: Request):
+    if not _authed(req):
+        return _deny()
+    body = await _json(req)
+    focus = str(body.get("focus") or "auto")
+    result = await upgrades.run_cycle(focus=focus, manual=True)
+    return JSONResponse({"ok": True, "result": result, "status": upgrades.status()})
+
+
 async def check_ai(req: Request):
     if not _authed(req):
         return _deny()
@@ -309,8 +356,10 @@ async def notaus(req: Request):
 
 async def health(req):
     status = _provider_status()
-    return JSONResponse({"ok": True, "app": "jarvis", "version": "2.0.0", "provider": config.active_provider(),
-                         "ai_ready": bool(status.get("ok") and status.get("model_ok"))})
+    return JSONResponse({"ok": True, "app": "jarvis", "version": "2.1.0", "provider": _runtime_provider(),
+                         "configured_provider": config.PROVIDER,
+                         "ai_ready": bool(status.get("ok") and status.get("model_ok")),
+                         "runtime_model": _runtime_model()})
 
 
 async def bad_request(req, exc):
@@ -324,6 +373,8 @@ app = Starlette(exception_handlers={ValueError: bad_request, TypeError: bad_requ
     Route("/api/config", app_config),
     Route("/api/setup", setup, methods=["POST"]),
     Route("/api/xkiro-models", xkiro_models),
+    Route("/api/hf-models", hf_models),
+    Route("/api/upgrade", run_upgrade, methods=["POST"]),
     Route("/api/login", login, methods=["POST"]),
     Route("/api/chat", chat, methods=["POST"]),
     Route("/api/check", check_ai, methods=["POST"]),

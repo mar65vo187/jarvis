@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from . import autopilot, claude, config, telegram_bot, xkiro
+from . import autopilot, claude, config, huggingface, telegram_bot, upgrades, xkiro
 from .web import app
 
 OLLAMA_STATUS = config.OLLAMA_STATUS  # gemeinsam genutzt (auch wenn als __main__ gestartet)
@@ -96,7 +96,8 @@ async def main():
                                            proxy_headers=False))
     services = [asyncio.create_task(_forever("KI-Status", monitor_provider)),
                 asyncio.create_task(_forever("Telegram", telegram_bot.run)),
-                asyncio.create_task(_forever("Autopilot", autopilot.loop))]
+                asyncio.create_task(_forever("Autopilot", autopilot.loop)),
+                asyncio.create_task(_forever("Agent-Upgrades", upgrades.loop))]
     try:
         await server.serve()
     finally:
@@ -117,6 +118,8 @@ async def check_provider(start_if_needed=False):
         return await claude.check()
     if provider == "xkiro":
         return await xkiro.check()
+    if provider == "huggingface":
+        return await huggingface.check()
     return await check_ollama(start_if_needed=start_if_needed)
 
 

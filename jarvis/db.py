@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS actions(
 CREATE TABLE IF NOT EXISTS skills(
   id INTEGER PRIMARY KEY, name TEXT, version INTEGER, description TEXT, status TEXT DEFAULT 'pending',
   file TEXT, created REAL);
+CREATE TABLE IF NOT EXISTS model_metrics(
+  source TEXT, model TEXT, successes INTEGER DEFAULT 0, failures INTEGER DEFAULT 0,
+  total_latency_ms INTEGER DEFAULT 0, last_used REAL DEFAULT 0,
+  PRIMARY KEY(source,model));
+CREATE TABLE IF NOT EXISTS agent_profiles(
+  id INTEGER PRIMARY KEY, key TEXT UNIQUE, name TEXT, mission TEXT, vendors_json TEXT DEFAULT '[]',
+  reasoning INTEGER DEFAULT 1, web_search INTEGER DEFAULT 0, task_type TEXT DEFAULT 'general',
+  parent_key TEXT DEFAULT '', generation INTEGER DEFAULT 1, score REAL DEFAULT 0,
+  status TEXT DEFAULT 'active', created REAL, updated REAL);
+CREATE TABLE IF NOT EXISTS upgrade_runs(
+  id INTEGER PRIMARY KEY, ts REAL, focus TEXT, status TEXT, candidate_key TEXT DEFAULT '',
+  score REAL DEFAULT 0, details TEXT DEFAULT '');
 """
 )
 # Migrationen für bestehende Datenbanken (älterer Stand) – idempotent.

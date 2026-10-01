@@ -1,0 +1,39 @@
+name: Jarvis remote command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  jarvis:
+    if: ${{ github.actor == github.repository_owner && startsWith(github.event.comment.body, '/jarvis ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Run Jarvis remote brain
+        env:
+          JARVIS_LOCAL: "0"
+          DATA_DIR: ${{ runner.temp }}/jarvis-data
+          JARVIS_ENV_FILE: ${{ runner.temp }}/jarvis.env
+          JARVIS_PROVIDER: auto
+          JARVIS_CLOUD_ENABLED: "1"
+          JARVIS_AGENT_USE_OLLAMA: "0"
+          JARVIS_UPGRADE_AUTO: "0"
+          XKIRO_API_KEY: ${{ secrets.XKIRO_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          JARVIS_REMOTE_TASK: ${{ github.event.comment.body }}
+        run: python -m jarvis.github_remote > jarvis-response.txt
+      - name: Reply to issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body-file jarvis-response.txt

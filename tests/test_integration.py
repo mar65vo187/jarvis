@@ -10,7 +10,7 @@ from unittest.mock import patch
 # Reuse the existing test bootstrap: no real user data or credentials are touched.
 import test_jarvis
 import httpx
-from jarvis import brain, claude, config, db, guard, main, web, xkiro
+from jarvis import brain, claude, config, db, guard, huggingface, main, web, xkiro
 
 REAL_CLIENT = httpx.AsyncClient
 
@@ -24,9 +24,13 @@ class Integration(unittest.TestCase):
         os.environ['JARVIS_PROVIDER'] = 'auto'
         for key in ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_DAILY_BUDGET_USD', 'CLAUDE_MODEL', 'CLAUDE_PRICE_IN', 'CLAUDE_PRICE_OUT',
                     'XKIRO_API_KEY', 'XKIRO_MODEL', 'XKIRO_REASONING_EFFORT', 'JARVIS_CLOUD_ENABLED',
+                    'HF_TOKEN', 'HUGGINGFACE_TOKEN', 'HF_MODEL', 'HF_VISION_MODEL', 'HF_POLICY',
                     'JARVIS_AGENTS_ENABLED', 'JARVIS_AGENT_MODE', 'JARVIS_AGENT_MAX_AGENTS',
                     'JARVIS_AGENT_MAX_PARALLEL', 'JARVIS_AGENT_MAX_TOKENS', 'JARVIS_AGENT_MODEL_FALLBACKS',
-                    'JARVIS_AGENT_MISSION_EVERY', 'JARVIS_AGENT_PREFER_FREE', 'JARVIS_AGENT_ALLOW_PREMIUM'):
+                    'JARVIS_AGENT_MISSION_EVERY', 'JARVIS_AGENT_PREFER_FREE', 'JARVIS_AGENT_ALLOW_PREMIUM',
+                    'JARVIS_AGENT_USE_XKIRO', 'JARVIS_AGENT_USE_HF', 'JARVIS_AGENT_USE_OLLAMA',
+                    'JARVIS_UPGRADE_AUTO', 'JARVIS_UPGRADE_FREE_ONLY', 'JARVIS_UPGRADE_INTERVAL_HOURS',
+                    'JARVIS_UPGRADE_MAX_CHILDREN', 'JARVIS_UPGRADE_BENCH_TASKS'):
             os.environ.pop(key, None)
         config.reload()
         db.ex('DELETE FROM usage')
@@ -36,11 +40,13 @@ class Integration(unittest.TestCase):
         db.set_setting('setup_done', '0')
         self.status = dict(config.CLAUDE_STATUS)
         self.xkiro_status = dict(config.XKIRO_STATUS)
+        self.hf_status = dict(config.HF_STATUS)
         self.ollama = dict(config.OLLAMA_STATUS)
         self.hooks = list(web.NOTIFY_HOOKS)
         web.NOTIFY_HOOKS[:] = [web._notify_hook]
         claude._lock = asyncio.Lock()
         xkiro._lock = asyncio.Lock()
+        huggingface._lock = asyncio.Lock()
         brain._ollama_lock = asyncio.Lock()
         brain._locks.clear()
 
@@ -54,6 +60,8 @@ class Integration(unittest.TestCase):
         config.CLAUDE_STATUS.update(self.status)
         config.XKIRO_STATUS.clear()
         config.XKIRO_STATUS.update(self.xkiro_status)
+        config.HF_STATUS.clear()
+        config.HF_STATUS.update(self.hf_status)
         config.OLLAMA_STATUS.clear()
         config.OLLAMA_STATUS.update(self.ollama)
         self.tmp.cleanup()
@@ -67,6 +75,9 @@ class Integration(unittest.TestCase):
 
     def fake_xkiro_api(self, handler):
         return patch.object(xkiro.httpx, 'AsyncClient', side_effect=lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handler), **kw))
+
+    def fake_hf_api(self, handler):
+        return patch.object(huggingface.httpx, 'AsyncClient', side_effect=lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handler), **kw))
 
     def client(self, host='127.0.0.1'):
         return REAL_CLIENT(transport=httpx.ASGITransport(app=web.app, client=('127.0.0.1', 1234)),
@@ -294,17 +305,59 @@ class Integration(unittest.TestCase):
         config.reload()
         self.assertEqual(config.active_provider(), 'ollama')
 
-    def test_auto_prefers_xkiro_then_claude_then_local(self):
+    def test_auto_prefers_xkiro_then_huggingface_then_claude_then_local(self):
         os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
-                          XKIRO_API_KEY='x', ANTHROPIC_API_KEY='a')
+                          XKIRO_API_KEY='x', HF_TOKEN='hf_x', ANTHROPIC_API_KEY='a')
         config.reload()
         self.assertEqual(config.active_provider(), 'xkiro')
         os.environ.pop('XKIRO_API_KEY')
+        config.reload()
+        self.assertEqual(config.active_provider(), 'huggingface')
+        os.environ.pop('HF_TOKEN')
         config.reload()
         self.assertEqual(config.active_provider(), 'claude')
         os.environ.pop('ANTHROPIC_API_KEY')
         config.reload()
         self.assertEqual(config.active_provider(), 'ollama')
+
+    def test_huggingface_openai_protocol(self):
+        os.environ.update(JARVIS_PROVIDER='huggingface', JARVIS_CLOUD_ENABLED='1',
+                          HF_TOKEN='hf-test', HF_MODEL='openai/gpt-oss-120b', HF_POLICY='cheapest')
+        config.reload()
+        def respond(req):
+            self.assertEqual(req.headers.get('authorization'), 'Bearer hf-test')
+            if req.url.path.endswith('/models'):
+                return httpx.Response(200, json={'data': [{'id':'openai/gpt-oss-120b','owned_by':'openai',
+                    'providers':[{'provider':'test','status':'live','context_length':131072,'supports_tools':True,
+                                  'pricing':{'input':0.1,'output':0.2}}]}]})
+            payload = json.loads(req.content)
+            self.assertEqual(payload['model'], 'openai/gpt-oss-120b:cheapest')
+            return httpx.Response(200, json={'choices':[{'message':{'role':'assistant','content':'HF bereit.'},
+                                                         'finish_reason':'stop'}],
+                                             'usage':{'prompt_tokens':5,'completion_tokens':2}})
+        with self.fake_hf_api(respond):
+            status = asyncio.run(huggingface.check())
+            self.assertTrue(status['ok'])
+            out = asyncio.run(brain._call([{'role':'user','content':'Hallo'}], max_tokens=50))
+        self.assertEqual(out['message']['content'], 'HF bereit.')
+
+
+    def test_auto_runtime_failover_xkiro_to_huggingface(self):
+        os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
+                          XKIRO_API_KEY='x', HF_TOKEN='hf_x')
+        config.reload()
+
+        async def x_fail(*args, **kwargs):
+            raise RuntimeError('xKiro temporary outage')
+
+        async def hf_ok(*args, **kwargs):
+            return {'message': {'content': 'HF fallback bereit.', 'tool_calls': []}}
+
+        with patch.object(xkiro, 'call', new=x_fail), patch.object(huggingface, 'call', new=hf_ok):
+            out = asyncio.run(brain._call([{'role':'user','content':'Hallo'}], max_tokens=50))
+        self.assertEqual(out['message']['content'], 'HF fallback bereit.')
+        self.assertEqual(brain.LAST_PROVIDER['provider'], 'huggingface')
+        self.assertEqual(brain.LAST_PROVIDER['model'], config.HF_MODEL)
 
 if __name__ == '__main__':
     unittest.main()

@@ -3,166 +3,218 @@
 ## 1. Windows installieren
 
 1. Im GitHub-Repository **Code → Download ZIP** wählen.
-2. ZIP mit **Alle extrahieren** vollständig entpacken; Installer nicht direkt im ZIP starten.
+2. ZIP vollständig mit **Alle extrahieren** entpacken.
 3. `JARVIS-INSTALLIEREN.bat` doppelklicken.
-4. Der Installer installiert Python im Benutzerkonto, richtet die Python-Umgebung
-   ein und kopiert Jarvis nach `%LOCALAPPDATA%\Jarvis`.
-5. Zusatzpakete sind optional. Für reine Textaufgaben **N** wählen.
-6. Bei der KI-Auswahl **X** für xKiro, **C** für Claude oder **L** für Ollama wählen.
-7. Im geöffneten Fenster Zugang/Modell eintragen, Einrichtung speichern und **KI-VERBINDUNG TESTEN** ausführen.
+4. Zusatzpakete für Sprache/Office sind optional.
+5. KI wählen: **X** xKiro, **H** Hugging Face, **C** Claude oder **L** Ollama.
+6. Im geöffneten Jarvis-Fenster Zugang und Modell speichern.
+7. **KI-VERBINDUNG TESTEN** ausführen.
 
-Autostart und Desktop-Verknüpfung werden eingerichtet. Jarvis läuft mit deinen
-normalen Benutzerrechten. Updates behalten Einstellungen, Chats, Gedächtnis,
-Missionen, Sicherungen und eigene Skills. Keine Datenbank wird zurückgesetzt.
+Der Installer kopiert Jarvis nach `%LOCALAPPDATA%\Jarvis`, behält vorhandene
+`.env`-/SQLite-Daten bei und richtet Desktop-/Startmenü-Links ein.
 
-## 2. xKiro Multi-Modell verbinden
+Zusätzlich wird **Jarvis-Watchdog** eingerichtet. Er läuft im Benutzer-Autostart,
+prüft den lokalen `/health`-Endpunkt und startet Jarvis nach einem Absturz neu.
+Das funktioniert, solange der Windows-PC eingeschaltet und der Benutzer angemeldet
+ist.
 
-1. In deinem xKiro-Konto einen API-Schlüssel erzeugen.
-2. Im Jarvis-Fenster **EINSTELLUNGEN** öffnen und **xKiro** wählen.
-3. API-Schlüssel eintragen. Mit **XKIRO-MODELLE LADEN** lädt Jarvis den aktuellen
-   Modellkatalog und du wählst die gewünschte Modell-ID im Format `anbieter/modell`.
-4. Optional Reasoning-Stufe wählen, dann **SPEICHERN & STARTEN**.
-5. **KI-VERBINDUNG TESTEN** erzeugt eine echte kurze Antwort.
+## 2. xKiro verbinden
 
-Mit **Cloud-KI = AUS** werden xKiro und Claude hart deaktiviert; Jarvis fällt dann
-auf den lokalen Ollama-Weg zurück. Schlüssel bleiben in der lokalen `.env` und
-werden nicht vom Dashboard zurückgegeben.
+1. xKiro-API-Schlüssel erzeugen.
+2. **EINSTELLUNGEN → xKiro** wählen.
+3. Schlüssel eintragen.
+4. Mit **XKIRO-MODELLE LADEN** den aktuellen Katalog laden.
+5. Modell und optional Reasoning-Stufe wählen.
+6. Speichern und Verbindung testen.
 
-### Multi-Agenten-Rat
+xKiro ist die breiteste Cloud-Quelle im Agentenrat und unterstützt in Jarvis auch
+die Websuche des Researcher-Agenten.
 
-Unter **EINSTELLUNGEN → Multi-Agenten-Rat** kann Jarvis mehrere unterschiedliche
-xKiro-Modelle als Spezialisten einsetzen. Standard ist **AUTO**: Nur bei komplexen
-Aufgaben werden bis zu fünf Rollen ausgewählt. Mögliche Rollen sind Strategist,
-Researcher, Engineer, Analyst, Critic, Security, Creative und Auditor.
+## 3. Hugging Face Inference Providers
 
-Die Spezialisten bekommen **keine PC-/Datei-/Zahlungswerkzeuge**. Sie liefern nur
-Analyse und Gegenprüfung; der Master-Jarvis entscheidet danach und führt Aktionen
-über seine normalen Werkzeuge und Freigaberegeln aus.
+1. In Hugging Face einen User Access Token mit Berechtigung für Inference Providers
+   erstellen.
+2. In Jarvis **Hugging Face** als Master-Anbieter wählen oder nur als
+   **Agentenquelle Hugging Face** aktivieren.
+3. `HF_TOKEN` speichern.
+4. **HF-MODELLE LADEN** klicken und ein kompatibles Chat-Modell wählen.
+5. Routing-Policy auswählen; Standard ist `cheapest`.
+6. Für Bildanalyse optional ein geeignetes `HF_VISION_MODEL` eintragen.
 
-Jarvis liest den xKiro-Livekatalog und wählt passende Modelle nach Anbieter,
-Fähigkeiten, Zugangsstufe und Kostenpräferenz. Dadurch ist keine feste Liste von
-Modellnamen nötig. Standardmäßig werden kostenlose Modelle bevorzugt und
-Premium-Modelle nicht verwendet. Wer maximale Qualität statt Kostenpriorität will,
-kann die Kostenpräferenz deaktivieren oder Premium explizit erlauben.
+Jarvis spricht den OpenAI-kompatiblen Hugging-Face-Router direkt per HTTP an.
+Deshalb muss lokal kein großes Python-Transformers-Paket installiert werden, wenn
+du nur Inference Providers benutzt.
 
-## 3. Claude verbinden
+## 4. Claude direkt
 
-1. In der [Claude Console](https://platform.claude.com/) einen eigenen
-   Anthropic-API-Schlüssel erzeugen und API-Abrechnung einrichten.
-2. Im Jarvis-Fenster **EINSTELLUNGEN** öffnen.
-3. Anbieter **Claude** wählen, API-Schlüssel eintragen.
-4. Modell voreingestellt: `claude-sonnet-5-5`; ein anderes für deinen Zugang
-   verfügbares Modell kannst du ebenfalls eintragen.
-5. Tagesbudget einstellen; Standard **1 USD** nach Kostenschätzung.
-6. **SPEICHERN & STARTEN**. Jarvis prüft den Zugang und das Modell.
-7. **KI-VERBINDUNG TESTEN** erzeugt eine echte kurze Antwort.
-8. Schreibe beispielsweise: „Erstelle im Arbeitsordner eine Datei test.txt mit dem Text Hallo Marvin und prüfe sie.“
+1. In der Anthropic Console einen API-Schlüssel und API-Abrechnung einrichten.
+2. **Claude** als Anbieter wählen.
+3. Schlüssel und ein für deinen Zugang verfügbares Modell speichern.
+4. Tagesbudget/Kostenschätzung prüfen.
+5. Verbindung testen.
 
-Ein Claude-Chat-Abonnement allein ersetzt den API-Zugang nicht. Claude-Anfragen
-und Bildanalysen gehen an Anthropic. Der Schlüssel liegt in der lokalen `.env`,
-wird nicht im Dashboard zurückgegeben und gehört niemals in GitHub.
+Ein Claude-Chat-Abo ersetzt keinen API-Schlüssel.
 
-Das Budget nutzt konfigurierbare Preise und eine vorsichtige Schätzung vor jeder
-Anfrage; nach der Antwort werden Tokens protokolliert. Dies ist kein garantiertes
-Abrechnungslimit. Bei Modellwechsel `CLAUDE_PRICE_IN` und `CLAUDE_PRICE_OUT`
-(USD je Million Tokens) nach aktueller Preisliste ändern. `0` deaktiviert das
-Jarvis-Tageslimit. Ollama benötigt kein API-Budget.
+## 5. Ollama lokal
 
-## 4. Ollama lokal
+Bei Installation **L** wählen, wenn der Master vollständig lokal laufen soll.
+Ollama bleibt außerdem unabhängig vom Master-Anbieter eine mögliche Quelle für
+den Agentenrat.
 
-Bei Installation **L** wählen. Der Installer installiert Ollama, startet dessen
-lokalen Dienst und lädt ein Modell passend zum Arbeitsspeicher. Dieser erste
-Download umfasst mehrere GB. Ein Seh-Modell ist optional.
-
-| RAM | Voreinstellung |
+| RAM | Installer-Voreinstellung |
 |---|---|
 | 16 GB oder mehr | `qwen3:8b` |
 | 5–15 GB | `qwen3:4b-instruct-2507-q4_K_M` |
 | unter 5 GB | `qwen3:1.7b` |
 
-Kleine Modelle sind bei komplexen Aufgaben deutlich schwächer als Cloudmodelle.
-Mit 6 GB RAM wird es knapp; große andere Programme schließen. Für Textaufgaben
-ist kein Seh-Modell erforderlich. Für Screenshots benötigt Ollama ein Seh-Modell;
-Claude und geeignete xKiro-Modelle können Bilder ohne zusätzliches lokales Modell analysieren.
+Jarvis liest alle lokal installierten Ollama-Modelle über `/api/tags` ein.
+Damit können zusätzliche lokale Modelle ohne Jarvis-Codeänderung Agentenkandidaten
+werden. Große Modelle brauchen entsprechend RAM/VRAM und Plattenplatz.
 
-## 5. Telegram optional verbinden
+Mit **Cloud-KI = AUS** werden xKiro, Hugging Face und Claude für den Master
+gesperrt; der Master fällt auf Ollama zurück.
 
-1. In Telegram **@BotFather → /newbot** und eigenen Bot erstellen.
-2. Bot-Token in Jarvis **EINSTELLUNGEN** eintragen, speichern.
-3. Dashboard zeigt `/koppeln 123456` mit deinem aktuellen Code.
-4. Diesen Befehl deinem Bot im privaten Chat senden.
+## 6. Multi-Agenten-Rat
 
-Nach Kopplung reagiert er nur auf freigegebene Telegram-IDs.
+Unter **EINSTELLUNGEN → Multi-Agenten-Rat** stehen drei Modellquellen:
+
+- xKiro
+- Hugging Face
+- lokales Ollama
+
+Jarvis vereinigt deren Kataloge in einem Modellpool. Auswahlkriterien sind
+Spezialistenrolle, Anbieter, Reasoning-/Tool-/Vision-Fähigkeit, Kontextgröße,
+Kostenpräferenz sowie eine lokal gemessene Erfolgsquote des Modells.
+
+Feste Rollen: Strategist, Researcher, Engineer, Analyst, Critic, Security,
+Creative und Auditor. Bei komplexen Aufgaben laufen zuerst unabhängige
+Spezialisten. Danach bekommen Critic/Auditor die anderen Antworten und prüfen
+Widersprüche und unbelegte Aussagen.
+
+**Wichtig:** Spezialisten bekommen keine Werkzeuge, die Dateien, PC, Zahlungen oder
+Konten verändern. Side Effects bleiben beim Master-Jarvis und seinen Freigaben.
+
+## 7. Agent Factory / Upgrade-System
+
+Das Upgrade-System baut neue **Child-Agenten**. Ein Child-Agent ist eine neue,
+versionierte Kombination aus Rolle/Systemprompt und Modellpräferenzen. Das ist
+echte Agenten-Evolution, aber **kein Training neuer Foundation-Modellgewichte**.
+
+Ablauf:
+
+1. Parent-Agent auswählen.
+2. Factory-Modell erzeugt einen Candidate.
+3. Parent und Candidate bearbeiten identische Benchmark-Aufgaben.
+4. Ein separater Judge bewertet die Antworten blind als A/B.
+5. Die Seiten werden zwischen Benchmarks getauscht, um Positionsbias zu reduzieren.
+6. Nur ein Candidate mit ausreichendem Score wird aktiviert.
+7. Generation, Parent, Score und Status landen in SQLite.
+8. Schlechtere Candidates werden verworfen; alte schwächere Children können
+   archiviert werden.
+
+Standardmäßig läuft ein Auto-Upgrade höchstens alle 24 Stunden und verwendet nur
+kostenlose/lokale Modelle, sofern verfügbar. Manuell geht es über den Dashboard-
+Button **AGENT-UPGRADE STARTEN** oder Telegram:
+
+`/upgrade`
+
+Optional:
+
+`/upgrade code`
+`/upgrade research`
+`/upgrade business`
+`/upgrade general`
+
+## 8. Telegram
+
+1. Bei **@BotFather → /newbot** einen eigenen Bot erstellen.
+2. Token in Jarvis speichern.
+3. Den im Dashboard angezeigten `/koppeln 123456`-Befehl an den Bot senden.
+4. Danach akzeptiert Jarvis nur gespeicherte Telegram-IDs.
+
+Wichtige Befehle:
 
 | Befehl | Wirkung |
 |---|---|
-| Nachricht / Foto / Dokument | Aufgabe an Jarvis |
-| `/status` | Anbieter, Missionen und Freigaben |
-| `/missionen`, `/log 3` | Missionen anzeigen |
-| `/pause 3`, `/weiter 3`, `/stopp 3` | Mission steuern |
-| `/ja 12`, `/nein 12` | Freigabe beantworten |
+| normale Nachricht | Aufgabe an Master-Jarvis |
+| `/status` | Anbieter, Missionen, Agentenstatus |
+| `/agenten` | Modellquellen und Child-Agenten |
+| `/upgrade [typ]` | Agent Factory starten |
+| `/missionen`, `/log <id>` | Missionen |
+| `/ja <id>`, `/nein <id>` | Freigaben |
 | `/screenshot` | PC-Bildschirm, falls verfügbar |
-| `/notaus` | Neue Aktionen blockieren, Missionen pausieren |
-| `/weiter` | NOTAUS aufheben; Missionen separat weiterführen |
-| `/neu` | Gespräch leeren; Gedächtnis behalten |
+| `/notaus` | Aktionen blockieren und Missionen pausieren |
+| `/weiter` | NOTAUS aufheben |
+| `/neu` | Chatverlauf leeren |
 
-Spracheingabe in Telegram braucht das optionale `faster-whisper`-Paket.
-Windows/Browser können je nach Installation für das Dashboard auch eigene
-Spracherkennung und Sprachausgabe bereitstellen. Browser-Sprachdienste können
-Cloud-Dienste nutzen. Telegram-Sprachausgabe ist derzeit nicht implementiert;
-Telegram-Antworten kommen als Text.
+Telegram verwendet Long Polling und verbindet sich bei Netzwerkfehlern selbst neu.
+Der Windows-Watchdog startet den Jarvis-Prozess nach einem Absturz neu.
 
-## 6. Funktionen und Voraussetzungen
+**Grenze:** Ist dein PC aus oder Windows nicht angemeldet, kann die lokale Instanz
+nicht auf Telegram antworten. Für echte 24/7-Telegram-Erreichbarkeit brauchst du
+einen dauerhaft laufenden Rechner/VPS, auf dem Jarvis oder ein dafür vorgesehener
+Remote-Dienst läuft.
 
-Chats, Gedächtnis, Missionen, Zeitpläne, Dateiwerkzeuge und eigene Skills nutzen
-SQLite und den lokalen Arbeitsordner. Die ausgewählte KI muss erreichbar sein.
-„Lernen“ bedeutet gespeichertes Wissen und zusätzliche Werkzeuge; es trainiert
-keine neuen Modellgewichte und garantiert keine höhere Leistung als Claude/GPT.
+## 9. GitHub-Remote-Jarvis
 
-PC-Steuerung braucht einen laufenden Windows-PC mit Bildschirm und die
-Windows-Pakete. Notaus und Freigaben schützen bestimmte Aktionen; Shellbefehle
-und freigegebene Skills sind kein isolierter Sandkasten.
+Das Repository enthält `.github/workflows/jarvis-remote.yml`. Dieser Kanal ist
+bewusst stateless und advisory-only.
 
-Externe Funktionen benötigen jeweils deinen eigenen Zugang:
+Einrichtung:
 
-| Funktion | Einrichten |
-|---|---|
-| SMTP / IMAP | Mailserver, Benutzername, Passwort |
-| Stripe | Eigener Stripe-Schlüssel |
-| n8n | Bestehender n8n-Server, Webhook und Geheimwort |
-| Web-Recherche | Internetzugang; Suchanbieter muss erreichbar sein |
+1. Repository **Settings → Secrets and variables → Actions** öffnen.
+2. Mindestens eines der Secrets anlegen:
+   - `XKIRO_API_KEY`
+   - `HF_TOKEN`
+3. Ein normales GitHub-Issue im Repository öffnen.
+4. Als Repository-Owner kommentieren:
 
-`online/` enthält optional ein separates n8n-/Caddy-Setup für deinen eigenen
-Linux-Server und eine Domain. Es wurde hier kein Server gebucht oder bereitgestellt.
-Wenn der PC ausgeschaltet ist, führt der lokale Jarvis keine Missionen aus.
-Nur separat eingerichtete n8n-Workflows laufen auf einem Server weiter.
+`/jarvis Vergleiche ...`
 
-## 7. Diagnose
+GitHub Actions startet dann den Remote-Jarvis und schreibt die Antwort in das
+Issue zurück. Andere GitHub-Nutzer können den Job nicht mit `/jarvis` auslösen,
+weil der Workflow den Actor gegen den Repository-Owner prüft.
+
+Der GitHub-Remote-Modus hat **keine lokalen PC-/Datei-Werkzeuge**. Er ist ein
+zusätzlicher KI-Zugang und kein Ersatz für den lokalen Executor.
+
+GitHub Actions selbst ist kein geeigneter 24/7-Telegram-Daemon: gehostete Jobs
+haben Laufzeitgrenzen und geplante Workflows sind periodisch, nicht dauerhaft.
+Der GitHub-Kanal funktioniert deshalb ereignisbasiert.
+
+## 10. Sicherheit und Kosten
+
+- API-Schlüssel gehören in lokale `.env` oder GitHub Actions Secrets, nie in Git.
+- **Cloud-KI = AUS** erzwingt für den Master Ollama.
+- Agentenquellen lassen sich einzeln deaktivieren.
+- `kostenlose Modelle bevorzugen` priorisiert xKiro-free/Ollama-local.
+- Hugging-Face-Inference-Provider sind als `metered` behandelt; Auto-Upgrades
+  mit **nur kostenlos/lokal** nutzen sie deshalb nicht.
+- Premium-xKiro-Modelle sind im Agentenrat standardmäßig deaktiviert.
+- NOTAUS und bestehende Freigaberegeln bleiben für Side Effects erhalten.
+
+## 11. Diagnose
 
 | Problem | Lösung |
 |---|---|
-| xKiro-Schlüssel fehlt | EINSTELLUNGEN → xKiro-API-Schlüssel speichern |
-| xKiro-Modell fehlt | **XKIRO-MODELLE LADEN** und eine aktuelle Modell-ID auswählen |
-| Agentenrat bleibt aus | xKiro als aktiven Anbieter nutzen, Agentenrat = AN und Modus = AUTO/IMMER |
-| Zu viele Agentenkosten | kostenlose Modelle bevorzugen, Max. Spezialisten reduzieren oder Agenten-Modus = AUS |
-| Cloud-KI soll aus bleiben | EINSTELLUNGEN → **Cloud-KI = AUS**; Jarvis nutzt Ollama |
-| Claude-Schlüssel fehlt | EINSTELLUNGEN → Anthropic-API-Schlüssel speichern |
-| Claude 401 | Schlüssel in der Console prüfen/erneuern |
-| Claude-Modell fehlt | Für deinen Zugang verfügbares Modell einstellen |
-| Claude-Guthaben/Limit | API-Abrechnung prüfen oder auf Ollama wechseln |
-| Ollama offline | Ollama starten; im Terminal `ollama serve` |
-| Lokales Modell fehlt | `ollama pull MODELLNAME` |
-| Windows-Fenster startet nicht | `%LOCALAPPDATA%\Jarvis\data\jarvis.log` prüfen |
-| Port 8765 belegt | Andere Jarvis-Instanz schließen oder `PORT` in `.env` ändern |
+| xKiro fehlt | xKiro-Key speichern, Katalog laden |
+| Hugging Face fehlt | HF-Token mit Inference-Berechtigung speichern |
+| HF-Modell fehlt | **HF-MODELLE LADEN** und Modell wählen |
+| Agentenrat leer | mindestens xKiro, HF oder Ollama als Agentenquelle verfügbar machen |
+| Auto-Upgrade überspringt | kein kostenloses/lokales geeignetes Modell verfügbar oder Intervall noch nicht fällig |
+| Telegram antwortet nach Absturz nicht | `data\watchdog.log` und `data\jarvis.log` prüfen |
+| Telegram antwortet bei ausgeschaltetem PC nicht | dauerhaft laufenden Host/VPS verwenden |
+| GitHub `/jarvis` antwortet nicht | Actions aktiviert? Secret vorhanden? Kommentar vom Repo-Owner? |
+| Ollama offline | Ollama starten; ggf. `ollama serve` |
+| lokales Modell fehlt | `ollama pull MODELLNAME` |
+| Port 8765 belegt | andere Instanz schließen oder `PORT` ändern |
 
-`python -m jarvis --check` liefert eine maschinenlesbare Diagnose.
-`/health` prüft den App-Server; `ai_ready` zeigt getrennt den KI-Status.
+`python -m jarvis --check` prüft den aktiven Master-Anbieter. `/health` prüft
+den lokalen Jarvis-Prozess.
 
-## 8. Daten und Deinstallation
+## 12. Daten
 
 Windows: `%LOCALAPPDATA%\Jarvis\.env` und `data\`.
-Direkter Start aus dem Repository: `.env` und `data/` dort; über `DATA_DIR`
-und `JARVIS_ENV_FILE` anpassbar. Sicherungen liegen unter `data/backups`.
 
-`JARVIS-DEINSTALLIEREN.bat` entfernt Jarvis-Autostart und Verknüpfungen und
-beendet die App. Deine Daten bleiben erhalten. Ollama bleibt separat installiert.
+SQLite enthält Chats, Gedächtnis, Missionen, Agentenprofile, Upgrade-Historie und
+Modell-Zuverlässigkeitsmetriken. Updates sollen diese Daten nicht zurücksetzen.
