@@ -43,6 +43,15 @@ def reliability(source: str, model: str) -> float:
     return (int(r["successes"] or 0) + 1) / (total + 2)
 
 
+def average_latency_ms(source: str, model: str) -> float:
+    r = db.one("SELECT successes,failures,total_latency_ms FROM model_metrics WHERE source=? AND model=?",
+               (source, model))
+    if not r:
+        return 0.0
+    total = int(r.get("successes") or 0) + int(r.get("failures") or 0)
+    return float(r.get("total_latency_ms") or 0) / max(1, total)
+
+
 def record(source: str, model: str, ok: bool, latency_ms: int):
     db.ex("INSERT OR IGNORE INTO model_metrics(source,model) VALUES(?,?)", (source, model))
     db.ex("UPDATE model_metrics SET successes=successes+?, failures=failures+?, total_latency_ms=total_latency_ms+?, last_used=? WHERE source=? AND model=?",
@@ -60,7 +69,7 @@ async def call(row: dict, messages: list[dict], max_tokens: int, reasoning_effor
             result = await huggingface.call(messages, tools=None, max_tokens=max_tokens, model=model,
                                             reasoning_effort=reasoning_effort)
         elif source == "ollama":
-            result = await local_llm.call(messages, max_tokens=max_tokens, model=model)
+            result = await local_llm.call(messages, max_tokens=max_tokens, model=model, reasoning_effort=reasoning_effort)
         else:
             raise RuntimeError(f"Unbekannte Modellquelle: {source}")
         record(source, model, True, int((time.perf_counter() - started) * 1000))
@@ -70,7 +79,13 @@ async def call(row: dict, messages: list[dict], max_tokens: int, reasoning_effor
         raise
 
 
-def best(rows: list[dict], *, free_only: bool = False, exclude: set[tuple[str,str]] | None = None) -> dict | None:
+def best(rows: list[dict], *, free_only: bool = False, exclude: set[tuple[str,str]] | None = None,
+         mode: str = "balanced", require_reasoning: bool = False) -> dict | None:
+    """Choose a model using reliability *and* observed latency.
+
+    fast: strongly rewards low latency; deep: prioritizes reasoning/reliability;
+    balanced keeps the previous quality/cost behavior with a small latency penalty.
+    """
     exclude = exclude or set()
     scored = []
     for row in rows:
@@ -80,12 +95,24 @@ def best(rows: list[dict], *, free_only: bool = False, exclude: set[tuple[str,st
         tier = str(row.get("access_tier") or "")
         if free_only and tier not in ("free", "local"):
             continue
+        caps = row.get("capabilities") or {}
+        if require_reasoning and not caps.get("reasoning"):
+            continue
         rel = reliability(*key)
-        score = rel * 200
+        latency = average_latency_ms(*key)
+        score = rel * (300 if mode == "deep" else 220)
         if tier == "local": score += 160
         elif tier == "free": score += 120
-        if (row.get("capabilities") or {}).get("reasoning"): score += 40
-        if (row.get("capabilities") or {}).get("tools"): score += 10
+        if caps.get("reasoning"):
+            score += 120 if mode == "deep" else 40
+        if caps.get("tools"): score += 10
+        if latency > 0:
+            if mode == "fast":
+                score -= min(latency / 25.0, 260)
+            elif mode == "deep":
+                score -= min(latency / 250.0, 60)
+            else:
+                score -= min(latency / 100.0, 100)
         scored.append((score, key, row))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return scored[0][2] if scored else None

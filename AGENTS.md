@@ -8,6 +8,7 @@ Mehrere KIs arbeiten an diesem Repo – bitte kleine, nachvollziehbare Commits m
   wechselt bei vorübergehendem Cloud-Ausfall auf Ollama
 - `jarvis/privacy.py` – Einbahnstraße: Markierung privater Daten, Ausgangsschleuse, Verschlüsselung
 - `jarvis/knowledge.py` – eigener Wissensspeicher (Wissen von Lehrer-KIs, nur herein)
+- `jarvis/performance.py` – Adaptive Brain: Fast/Balanced/Deep, lokale Latenzmessung und Auto-Tuning
 - `jarvis/xkiro.py` / `jarvis/claude.py` – Cloud-Anbieter · `jarvis/agents.py` – Spezialistenrat (nur `smart`,
   nie mit privaten Inhalten) · `jarvis/errors.py` – `CloudUnavailable` (vorübergehend → Ersatz erlaubt),
   `CloudConfigError` (Einrichtung → kein Wechsel), `PrivacyBlocked`
@@ -44,5 +45,6 @@ PowerShell-Syntax und einen echten Browser-Durchlauf (`tests/browser.cjs`).
 5. Keine Geheimnisse ins Repo – es ist öffentlich. Schlüssel nie in Meldungen, Logs oder Dashboard-Antworten.
 6. Anbieterwechsel wiederholt nie bereits ausgeführte Werkzeuge; Einrichtungsfehler wechseln nie still.
 6b. Einbahnstraße: Wissen darf herein, private Daten nie hinaus (Standard `JARVIS_PRIVACY=strikt`).
+6c. Selbstverbesserung darf automatisch Routing/Prompts/Profile optimieren, aber Kerncode nie ungeprüft live überschreiben.
 7. `windows/install.ps1`: nur ASCII, keine Admin-Rechte, HKCU-Autostart, nie `New-Item -Force` auf den Run-Schlüssel.
 8. `hud/index.html` bleibt ein gültiges Dokument (ein `<script>`, ein `</html>`) – vor dem Commit prüfen.

@@ -107,7 +107,9 @@ async def _propose(parent: agents.AgentSpec, focus: str, row: dict) -> agents.Ag
          'name, mission, vendors (Array), reasoning (bool), web_search (bool).'},
         {"role": "user", "content":
          f"DOMÄNE: {focus}\nELTERN-AGENT: {parent.name}\nELTERN-MISSION: {parent.mission}\n"
-         "Verbessere Präzision, Gegenprüfung, Fehlererkennung und Prüfbarkeit. Die Mission soll 100-500 Wörter kurz bleiben."},
+         "Verbessere Präzision, Gegenprüfung, Fehlererkennung, Prüfbarkeit und Tokenökonomie. "
+         "Der Child-Agent soll mindestens gleich gut, aber möglichst schneller und knapper arbeiten. "
+         "Die Mission soll 100-500 Wörter kurz bleiben."},
     ]
     out = await model_pool.call(row, prompt, max_tokens=700, reasoning_effort="high")
     return _candidate_spec(_extract_json(((out.get("message") or {}).get("content") or "")), focus, parent)
@@ -133,20 +135,28 @@ async def run_cycle(focus: str = "auto", manual: bool = False) -> str:
         parent = _parent(focus)
         rows = await model_pool.catalog()
         free_only = config.UPGRADE_FREE_ONLY and not manual
-        factory = model_pool.best(rows, free_only=free_only)
+        factory = model_pool.best(rows, free_only=free_only, mode="deep", require_reasoning=True) or model_pool.best(rows, free_only=free_only, mode="deep")
         if not factory:
             msg = "Kein geeignetes kostenloses/lokales Modell für das automatische Upgrade verfügbar."
             LAST.update(ts=started, status=msg, focus=focus, score=0, candidate="")
             db.ex("INSERT INTO upgrade_runs(ts,focus,status,details) VALUES(?,?,?,?)", (started, focus, "skipped", msg))
             return msg
-        judge = model_pool.best(rows, free_only=free_only,
+        judge = model_pool.best(rows, free_only=free_only, mode="deep", require_reasoning=True,
                                 exclude={(str(factory.get("source")), str(factory.get("id")))}) or factory
         candidate = await _propose(parent, focus, factory)
         tasks = BENCH[focus][:config.UPGRADE_BENCH_TASKS]
         wins = ties = losses = 0
         notes = []
+        parent_ms = child_ms = 0
+
+        async def timed(spec, task):
+            started_answer = time.perf_counter()
+            text = await _answer(spec, task, factory)
+            return text, int((time.perf_counter() - started_answer) * 1000)
+
         for i, task in enumerate(tasks):
-            parent_text, child_text = await asyncio.gather(_answer(parent, task, factory), _answer(candidate, task, factory))
+            (parent_text, p_ms), (child_text, c_ms) = await asyncio.gather(timed(parent, task), timed(candidate, task))
+            parent_ms += p_ms; child_ms += c_ms
             # alternate sides to reduce position bias
             if i % 2:
                 winner = await _judge(task, child_text, parent_text, judge)
@@ -161,11 +171,15 @@ async def run_cycle(focus: str = "auto", manual: bool = False) -> str:
             else:
                 losses += 1; notes.append("loss")
         score = round((wins + 0.5 * ties) / max(1, len(tasks)) * 100, 1)
-        promote = score >= 60 and wins >= losses
+        # A small quality gain is not worth a massive slowdown. A clearly better (>=75)
+        # candidate may spend more compute; otherwise cap regression at ~35%.
+        speed_ratio = child_ms / max(1, parent_ms)
+        promote = score >= 60 and wins >= losses and (speed_ratio <= 1.35 or score >= 75)
         status = "promoted" if promote else "rejected"
         if promote:
             _save(candidate, parent, score)
-        detail = f"{candidate.name}: {wins} win / {ties} tie / {losses} loss gegen {parent.name}; Benchmark {score:.1f}"
+        detail = (f"{candidate.name}: {wins} win / {ties} tie / {losses} loss gegen {parent.name}; "
+                  f"Benchmark {score:.1f}; Zeit {child_ms} ms vs. {parent_ms} ms ({speed_ratio:.2f}x)")
         db.ex("INSERT INTO upgrade_runs(ts,focus,status,candidate_key,score,details) VALUES(?,?,?,?,?,?)",
               (started, focus, status, candidate.key, score, detail))
         db.set_setting("upgrade_last_ts", str(started))

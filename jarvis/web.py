@@ -13,7 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from . import agents, autopilot, brain, config, db, huggingface, pc, upgrades, voice, xkiro
+from . import agents, autopilot, brain, config, db, huggingface, pc, performance, upgrades, voice, xkiro
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .tools import NOTIFY_HOOKS
@@ -226,6 +226,9 @@ async def state(req: Request):
         "bot_name": db.get_setting("telegram_bot_name", ""),
         "agents": agents.public_state(),
         "upgrades": upgrades.status(),
+        "performance": performance.status(),
+        "runtime_profile": brain.LAST_ROUTE.get("profile", ""),
+        "runtime_latency_ms": brain.LAST_ROUTE.get("latency_ms", 0),
         "missions": missions,
         "approvals": db.q("SELECT id,mission_id,kind,question,details FROM approvals WHERE status='pending' ORDER BY id"),
         "schedules": [{**s, "next_run_fmt": db.fmt_ts(s["next_run"])} for s in

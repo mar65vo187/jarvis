@@ -33,7 +33,7 @@ async def list_model_details() -> list[dict]:
     return out
 
 
-async def call(messages, max_tokens=None, model=None):
+async def call(messages, max_tokens=None, model=None, reasoning_effort=""):
     payload = {
         "model": model or config.MODEL,
         "messages": messages,
@@ -42,7 +42,10 @@ async def call(messages, max_tokens=None, model=None):
         "options": {"num_predict": max_tokens or config.AGENT_MAX_TOKENS,
                     "temperature": config.TEMPERATURE, "num_ctx": config.NUM_CTX},
     }
-    if not config.THINK:
+    effort = (reasoning_effort or "").lower()
+    if effort in ("high", "xhigh", "max"):
+        payload["think"] = True
+    elif effort in ("none", "low", "medium") or not config.THINK:
         payload["think"] = False
     started = time.perf_counter()
     try:

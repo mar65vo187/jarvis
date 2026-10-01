@@ -206,6 +206,9 @@ def rank_models(spec: AgentSpec, rows: list[dict], used: set[tuple[str, str]] | 
         key = (source, mid)
         score = 1000 - vendor_rank * 120
         score += int(model_pool.reliability(source, mid) * 120)
+        avg_ms = model_pool.average_latency_ms(source, mid)
+        if avg_ms > 0:
+            score -= min(int(avg_ms / 120), 80)
         if spec.reasoning and caps.get("reasoning"):
             score += 90
         if caps.get("tools"):

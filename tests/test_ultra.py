@@ -54,7 +54,7 @@ class Ultra(unittest.TestCase):
                                                else '{"winner":"A","reason":"besser"}'}}
             return {"message":{"content":"Robuste Benchmark-Antwort mit Tests, Rollback und Verifikation."}}
 
-        def fake_best(rows, free_only=False, exclude=None):
+        def fake_best(rows, free_only=False, exclude=None, mode="balanced", require_reasoning=False):
             return ROWS[1] if exclude else ROWS[0]
 
         with patch.object(model_pool, "catalog", new=AsyncMock(return_value=ROWS)), \
