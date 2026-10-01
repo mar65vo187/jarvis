@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from . import agents, claude, config, db, prompts, xkiro
+from . import agents, claude, config, db, huggingface, prompts, xkiro
 from .tools import all_schemas, run_tool
 
 
@@ -41,6 +41,8 @@ async def _call(messages: list[dict], tools: list[dict] | None = None, max_token
         return await claude.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     if provider == "xkiro":
         return await xkiro.call(messages, tools=tools, max_tokens=max_tokens, model=model)
+    if provider == "huggingface":
+        return await huggingface.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     return await _ollama_call(messages, tools, max_tokens, model)
 
 
@@ -116,8 +118,13 @@ async def describe_image(b64: str, w: int = 0, h: int = 0, question: str = "") -
     if provider == "ollama" and not config.VISION_MODEL:
         return ("[Bild vorhanden, aber kein Seh-Modell eingerichtet. Ohne JARVIS_VISION_MODEL kann ich den Inhalt "
                 "nicht sehen – nutze stattdessen windows/clipboard/PowerShell oder bitte den Owner.]")
+    if provider == "huggingface" and not config.HF_VISION_MODEL:
+        return ("[Bild vorhanden, aber für Hugging Face ist kein HF_VISION_MODEL eingerichtet. "
+                "Wähle ein VLM oder nutze xKiro/Claude bzw. ein lokales Seh-Modell.]")
     prompt = VISION_PROMPT.format(w=w or "?", h=h or "?") + (f"\nZusatzfrage: {question}" if question else "")
-    vision_model = config.CLAUDE_MODEL if provider == "claude" else config.XKIRO_MODEL if provider == "xkiro" else config.VISION_MODEL
+    vision_model = (config.CLAUDE_MODEL if provider == "claude" else
+                    config.XKIRO_MODEL if provider == "xkiro" else
+                    config.HF_VISION_MODEL if provider == "huggingface" else config.VISION_MODEL)
     try:
         resp = await _call([{"role": "user", "content": prompt, "images": [b64]}], tools=None,
                            max_tokens=1200, model=vision_model)
@@ -158,6 +165,8 @@ def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
         ctx, output = config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS
     elif provider == "xkiro":
         ctx, output = config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS
+    elif provider == "huggingface":
+        ctx, output = config.HF_NUM_CTX, config.HF_MAX_TOKENS
     else:
         ctx, output = config.NUM_CTX, config.MAX_TOKENS
     budget = ctx - min(output, ctx // 3) - _est_tokens(tools)
