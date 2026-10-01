@@ -5,11 +5,12 @@ the master Jarvis remains the only component allowed to act on the PC, files,
 missions, payments or external accounts.
 """
 import asyncio
+import json
 import re
 import time
 from dataclasses import dataclass
 
-from . import config, xkiro
+from . import config, db, model_pool
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class AgentSpec:
     vendors: tuple[str, ...]
     reasoning: bool = True
     web_search: bool = False
+    task_type: str = "general"
+    generation: int = 0
 
 
 SPECS = {
@@ -88,10 +91,18 @@ _BUSINESS = re.compile(r"\b(business|umsatz|vertrieb|kunde|lead|strategie|preis|
 _RISK = re.compile(r"\b(sicherheit|security|secret|api.?key|passwort|recht|vertrag|zahlung|konto|admin|auth|daten|privacy)\w*\b", re.I)
 
 
+def _has_agent_source() -> bool:
+    return bool(
+        (config.CLOUD_ENABLED and config.AGENT_USE_XKIRO and config.XKIRO_API_KEY)
+        or (config.CLOUD_ENABLED and config.AGENT_USE_HF and config.HF_TOKEN)
+        or config.AGENT_USE_OLLAMA
+    )
+
+
 def should_use_council(text: str) -> bool:
     if not config.AGENTS_ENABLED or config.AGENT_MODE == "off":
         return False
-    if config.active_provider() != "xkiro" or not config.XKIRO_API_KEY:
+    if not _has_agent_source():
         return False
     if config.AGENT_MODE == "always":
         return True
@@ -116,6 +127,26 @@ def task_type(text: str) -> str:
     return "general"
 
 
+def custom_specs() -> dict[str, AgentSpec]:
+    out = {}
+    for row in db.q("SELECT * FROM agent_profiles WHERE status='active' ORDER BY score DESC, generation DESC, id DESC"):
+        try:
+            vendors = tuple(json.loads(row.get("vendors_json") or "[]"))
+        except Exception:
+            vendors = ()
+        out[row["key"]] = AgentSpec(
+            row["key"], row.get("name") or row["key"].upper(), row.get("mission") or "",
+            vendors or ("openai", "anthropic", "google", "qwen", "deepseek", "z-ai"),
+            bool(row.get("reasoning", 1)), bool(row.get("web_search", 0)),
+            row.get("task_type") or "general", int(row.get("generation") or 1),
+        )
+    return out
+
+
+def all_specs() -> dict[str, AgentSpec]:
+    return {**SPECS, **custom_specs()}
+
+
 def choose_roles(text: str) -> list[str]:
     """Pick complementary roles without wasting calls on every simple task."""
     roles = ["strategist", "critic"]
@@ -129,7 +160,13 @@ def choose_roles(text: str) -> list[str]:
         roles += ["analyst", "creative"]
     if _RISK.search(text) and "security" not in roles:
         roles.append("security")
-    # preserve order, then apply budget
+    # Evolved child agents compete for one council seat in their specialty.
+    kind = task_type(text)
+    evolved = [r for r in db.q(
+        "SELECT key FROM agent_profiles WHERE status='active' AND task_type IN (?, 'general') ORDER BY score DESC, generation DESC LIMIT 1",
+        (kind,)) if r.get("key")]
+    if evolved:
+        roles.insert(max(1, len(roles) - 1), evolved[0]["key"])
     unique = list(dict.fromkeys(roles))
     return unique[:config.AGENT_MAX_AGENTS]
 
@@ -148,7 +185,7 @@ def _accessible(rows: list[dict]) -> list[dict]:
     return out
 
 
-def rank_models(spec: AgentSpec, rows: list[dict], used: set[str] | None = None) -> list[dict]:
+def rank_models(spec: AgentSpec, rows: list[dict], used: set[tuple[str, str]] | None = None) -> list[dict]:
     """Rank live-catalog models for one specialist. Never invent model IDs."""
     used = used or set()
     rows = _accessible(rows)
@@ -165,19 +202,24 @@ def rank_models(spec: AgentSpec, rows: list[dict], used: set[str] | None = None)
             vendor_rank = len(spec.vendors) + 2
 
         tier = str(row.get("access_tier") or "paid").lower()
+        source = str(row.get("source") or "")
+        key = (source, mid)
         score = 1000 - vendor_rank * 120
+        score += int(model_pool.reliability(source, mid) * 120)
         if spec.reasoning and caps.get("reasoning"):
             score += 90
         if caps.get("tools"):
             score += 20
         if caps.get("vision"):
             score += 5
-        if config.AGENT_PREFER_FREE and tier == "free":
+        if config.AGENT_PREFER_FREE and tier in ("free", "local"):
             score += 260
-        elif config.AGENT_PREFER_FREE and tier != "free":
+        elif config.AGENT_PREFER_FREE and tier not in ("free", "local"):
             score -= 80
-        if mid in used:
-            score -= 500  # diversity: distinct model if possible
+        if tier == "local":
+            score += 40
+        if key in used:
+            score -= 500  # diversity: distinct source/model if possible
         ctx = int(row.get("context_length") or 0)
         score += min(ctx // 10000, 30)
         ranked.append((score, mid, row))
@@ -224,22 +266,22 @@ async def _run_one(spec: AgentSpec, task: str, candidates: list[dict], peer_cont
         if not model:
             continue
         try:
-            resp = await xkiro.call(
-                _prompt(spec, task, peer_context),
-                tools=None,
+            resp = await model_pool.call(
+                row, _prompt(spec, task, peer_context),
                 max_tokens=config.AGENT_MAX_TOKENS,
-                model=model,
                 reasoning_effort=_effort(row),
-                web_search=spec.web_search,
+                web_search=spec.web_search and str(row.get("source")) == "xkiro",
             )
             text = ((resp.get("message") or {}).get("content") or "").strip()
             if text:
-                return {"key": spec.key, "name": spec.name, "model": model, "text": text, "ok": True}
+                return {"key": spec.key, "name": spec.name, "model": model,
+                        "source": row.get("source", ""), "text": text, "ok": True}
         except Exception as exc:
             errors.append(f"{model}: {str(exc)[:160]}")
     return {
         "key": spec.key, "name": spec.name,
         "model": candidates[0].get("id") if candidates else "",
+        "source": candidates[0].get("source") if candidates else "",
         "text": "", "ok": False,
         "error": " | ".join(errors[-2:]) or "Kein passendes Modell im Live-Katalog.",
     }
@@ -253,7 +295,7 @@ async def council(task: str) -> str:
         return ""
 
     try:
-        rows = await xkiro.list_model_details()
+        rows = await model_pool.catalog()
     except Exception as exc:
         LAST_RUN.update(ts=time.time(), used=False, task_type=task_type(task),
                         agents=[{"name": "CATALOG", "ok": False, "error": str(exc)[:180]}],
@@ -261,15 +303,16 @@ async def council(task: str) -> str:
         return ""
 
     roles = choose_roles(task)
-    used: set[str] = set()
+    specs = all_specs()
+    used: set[tuple[str, str]] = set()
     jobs = []
-    planned = []
     for role in roles:
-        spec = SPECS[role]
+        spec = specs.get(role)
+        if not spec:
+            continue
         candidates = rank_models(spec, rows, used)
         if candidates:
-            used.add(str(candidates[0].get("id") or ""))
-        planned.append((spec, candidates))
+            used.add((str(candidates[0].get("source") or ""), str(candidates[0].get("id") or "")))
         jobs.append((spec, candidates))
 
     sem = asyncio.Semaphore(config.AGENT_MAX_PARALLEL)
@@ -296,7 +339,7 @@ async def council(task: str) -> str:
     errors = len(results) - len(good)
     LAST_RUN.update(
         ts=time.time(), used=bool(good), task_type=task_type(task),
-        agents=[{k: r.get(k) for k in ("key", "name", "model", "ok", "error")} for r in results],
+        agents=[{k: r.get(k) for k in ("key", "name", "source", "model", "ok", "error")} for r in results],
         duration_ms=int((time.perf_counter() - started) * 1000), errors=errors,
     )
     if not good:
@@ -304,7 +347,7 @@ async def council(task: str) -> str:
 
     blocks = []
     for r in good:
-        blocks.append(f"### {r['name']} · {r['model']}\n{r['text']}")
+        blocks.append(f"### {r['name']} · {r.get('source','?')} · {r['model']}\n{r['text']}")
     return (
         "MULTI-AGENTENRAT (nur Beratung, nicht als ausgeführte Handlung behandeln):\n"
         + "\n\n".join(blocks)
@@ -320,6 +363,11 @@ def public_state() -> dict:
         "mission_every": config.AGENT_MISSION_EVERY,
         "prefer_free": bool(config.AGENT_PREFER_FREE),
         "allow_premium": bool(config.AGENT_ALLOW_PREMIUM),
-        "roles": [{"key": s.key, "name": s.name} for s in SPECS.values()],
+        "sources": {"xkiro": bool(config.XKIRO_API_KEY and config.CLOUD_ENABLED and config.AGENT_USE_XKIRO),
+                    "huggingface": bool(config.HF_TOKEN and config.CLOUD_ENABLED and config.AGENT_USE_HF),
+                    "ollama": bool(config.AGENT_USE_OLLAMA)},
+        "roles": [{"key": x.key, "name": x.name, "generation": x.generation}
+                  for x in all_specs().values()],
+        "custom_agents": len(custom_specs()),
         "last": dict(LAST_RUN),
     }
