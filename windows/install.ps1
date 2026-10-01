@@ -107,15 +107,17 @@ if (Test-Path $EnvFile) {
 $Provider = $Existing["JARVIS_PROVIDER"]
 if (-not $Provider) {
     Write-Host ""
-    $choice = Read-Host "  KI waehlen: xKiro Multi-Modell, Claude direkt oder lokale KI/Ollama? [X/c/l]"
+    $choice = Read-Host "  KI waehlen: xKiro, Hugging Face, Claude oder lokale KI/Ollama? [X/h/c/l]"
     if ($choice -match '^[lL]') { $Provider = "ollama" }
     elseif ($choice -match '^[cC]') { $Provider = "claude" }
+    elseif ($choice -match '^[hH]') { $Provider = "huggingface" }
     else { $Provider = "xkiro" }
 }
 $CloudEnabled = if ($Existing.ContainsKey("JARVIS_CLOUD_ENABLED")) { $Existing["JARVIS_CLOUD_ENABLED"] -ne "0" } else { $true }
 $HasXKiroKey = $Existing["XKIRO_API_KEY"] -or $env:XKIRO_API_KEY
+$HasHFKey = $Existing["HF_TOKEN"] -or $env:HF_TOKEN -or $env:HUGGINGFACE_TOKEN
 $HasClaudeKey = $Existing["ANTHROPIC_API_KEY"] -or $env:ANTHROPIC_API_KEY -or $env:CLAUDE_API_KEY
-$UseLocal = (-not $CloudEnabled) -or ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasXKiroKey -and -not $HasClaudeKey)
+$UseLocal = (-not $CloudEnabled) -or ($Provider -eq "ollama") -or ($Provider -eq "auto" -and -not $HasXKiroKey -and -not $HasHFKey -and -not $HasClaudeKey)
 $Model = if ($Existing["JARVIS_MODEL"] -and $Existing["JARVIS_MODEL"] -notmatch '^claude') { $Existing["JARVIS_MODEL"] } else { "qwen3:8b" }
 $VisionSet = $Existing["JARVIS_VISION_MODEL"]
 $Tune = [ordered]@{}
