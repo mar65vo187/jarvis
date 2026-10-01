@@ -1,0 +1,62 @@
+name: Jarvis remote command
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Auftrag für Jarvis"
+        required: true
+        type: string
+      issue_number:
+        description: "Optional: Antwort in dieses Issue schreiben"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  jarvis:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.actor == github.repository_owner &&
+       !github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/jarvis '))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: jarvis-remote-${{ github.event.issue.number || github.run_id }}
+      cancel-in-progress: false
+    env:
+      JARVIS_LOCAL: "0"
+      DATA_DIR: ${{ runner.temp }}/jarvis-data
+      JARVIS_ENV_FILE: ${{ runner.temp }}/jarvis.env
+      JARVIS_PROVIDER: auto
+      JARVIS_CLOUD_ENABLED: "1"
+      JARVIS_AGENT_USE_OLLAMA: "0"
+      JARVIS_UPGRADE_AUTO: "0"
+      XKIRO_API_KEY: ${{ secrets.XKIRO_API_KEY }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      JARVIS_REMOTE_TASK: ${{ github.event_name == 'issue_comment' && github.event.comment.body || inputs.task }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Run Jarvis remote brain
+        run: python -m jarvis.github_remote > jarvis-response.txt
+      - name: Reply to issue command
+        if: github.event_name == 'issue_comment'
+        run: gh issue comment "${{ github.event.issue.number }}" --body-file jarvis-response.txt
+      - name: Reply to workflow-dispatch issue
+        if: github.event_name == 'workflow_dispatch' && inputs.issue_number != ''
+        run: gh issue comment "${{ inputs.issue_number }}" --body-file jarvis-response.txt
+      - name: Show workflow-dispatch result
+        if: github.event_name == 'workflow_dispatch' && inputs.issue_number == ''
+        run: cat jarvis-response.txt >> "$GITHUB_STEP_SUMMARY"
