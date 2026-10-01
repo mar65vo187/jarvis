@@ -1,0 +1,21 @@
+#cloud-config
+# ============================================================================================
+#  J.A.R.V.I.S. ONLINE – Oracle Cloud: beim Erstellen der Instanz unter
+#  „Erweiterte Optionen anzeigen“ → „Management“ → „Cloud-init-Skript einfügen“ hier alles einfügen.
+#  VORHER die Werte unten ausfüllen (ohne Anführungszeichen ' im Wert).
+#  TS_AUTHKEY (Tailscale → Settings → Keys → Auth key) macht Jarvis NUR für deine Geräte erreichbar.
+#  Die API-Schlüssel sind optional (xKiro oder Claude – nur als Lehrer bzw. für Nicht-Privates); alle leer = nur lokale KI.
+# ============================================================================================
+write_files:
+  - path: /root/jarvis-setup.env
+    permissions: "0600"
+    content: |
+      TELEGRAM_BOT_TOKEN='HIER_BOT_TOKEN_VON_BOTFATHER'
+      JARVIS_PASSWORD='HIER_EIN_LANGES_PASSWORT'
+      XKIRO_API_KEY=''
+      ANTHROPIC_API_KEY=''
+      TS_AUTHKEY=''
+      JARVIS_PRIVACY='strikt'
+      JARVIS_DOMAIN=''
+runcmd:
+  - [bash, -c, "set -a; . /root/jarvis-setup.env; set +a; [ \"$TELEGRAM_BOT_TOKEN\" = HIER_BOT_TOKEN_VON_BOTFATHER ] && TELEGRAM_BOT_TOKEN=''; [ \"$JARVIS_PASSWORD\" = HIER_EIN_LANGES_PASSWORT ] && JARVIS_PASSWORD=''; curl -fsSL https://raw.githubusercontent.com/mar65vo187/jarvis/main/deploy/oracle/install.sh -o /root/jarvis-install.sh && bash /root/jarvis-install.sh > /var/log/jarvis-cloudinit.log 2>&1; shred -u /root/jarvis-setup.env || rm -f /root/jarvis-setup.env"]

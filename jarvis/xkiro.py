@@ -11,6 +11,7 @@ import time
 import httpx
 
 from . import config, db
+from .errors import CloudConfigError, CloudUnavailable
 
 _lock = asyncio.Semaphore(4)
 _catalog_cache: list[dict] = []
@@ -19,7 +20,7 @@ _catalog_checked = 0.0
 
 def _headers() -> dict:
     if not config.XKIRO_API_KEY:
-        raise RuntimeError("xKiro braucht einen API-Schlüssel. In EINSTELLUNGEN eintragen.")
+        raise CloudConfigError("xKiro braucht einen API-Schlüssel. In EINSTELLUNGEN eintragen.")
     return {"Authorization": f"Bearer {config.XKIRO_API_KEY}", "Content-Type": "application/json"}
 
 
@@ -207,13 +208,17 @@ async def call(messages, tools=None, max_tokens=None, model=None, reasoning_effo
                         await asyncio.sleep(delay)
                         delay *= 2
                         continue
-                    raise RuntimeError("xKiro ist nicht erreichbar. Internetverbindung prüfen.") from None
+                    raise CloudUnavailable("xKiro ist nicht erreichbar. Internetverbindung prüfen.") from None
                 except httpx.HTTPError:
-                    raise RuntimeError("xKiro-Anfrage unterbrochen oder Zeitlimit erreicht. Bitte erneut versuchen.") from None
+                    raise CloudUnavailable("xKiro-Anfrage unterbrochen oder Zeitlimit erreicht. Bitte erneut versuchen.") from None
                 if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
                     await asyncio.sleep(delay)
                     delay *= 2
                     continue
+                if response.status_code in (401, 403, 404):
+                    raise CloudConfigError(_clean_error(response))
+                if response.status_code in (402, 429) or response.status_code >= 500:
+                    raise CloudUnavailable(_clean_error(response))
                 if response.status_code >= 400:
                     raise RuntimeError(_clean_error(response))
                 try:

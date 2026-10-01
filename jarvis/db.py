@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS usage(
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS actions(
   id INTEGER PRIMARY KEY, ts REAL, kind TEXT, summary TEXT);
+CREATE TABLE IF NOT EXISTS knowledge(
+  id INTEGER PRIMARY KEY, topic TEXT, question TEXT, answer TEXT, source TEXT, ts REAL, uses INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS skills(
   id INTEGER PRIMARY KEY, name TEXT, version INTEGER, description TEXT, status TEXT DEFAULT 'pending',
   file TEXT, created REAL);
@@ -55,7 +57,11 @@ CREATE TABLE IF NOT EXISTS upgrade_runs(
 )
 # Migrationen für bestehende Datenbanken (älterer Stand) – idempotent.
 for _sql in ("ALTER TABLE approvals ADD COLUMN action_hash TEXT DEFAULT ''",
-             "ALTER TABLE approvals ADD COLUMN used INTEGER DEFAULT 0"):
+             "ALTER TABLE approvals ADD COLUMN used INTEGER DEFAULT 0",
+             # Privatsphäre: bestehende Einträge gelten vorsichtshalber als privat
+             "ALTER TABLE messages ADD COLUMN private INTEGER DEFAULT 0",
+             "ALTER TABLE memory ADD COLUMN private INTEGER DEFAULT 1",
+             "ALTER TABLE missions ADD COLUMN private INTEGER DEFAULT 0"):
     try:
         _conn.execute(_sql)
     except sqlite3.OperationalError:
@@ -95,23 +101,33 @@ def fmt_ts(ts: float | None) -> str:
 
 
 # ---------- Chatverlauf ----------
-def add_message(channel: str, role: str, content: str):
-    ex("INSERT INTO messages(channel,role,content,ts) VALUES(?,?,?,?)", (channel, role, content, now()))
+def add_message(channel: str, role: str, content: str, private: bool = False):
+    """Private Nachrichten werden verschlüsselt gespeichert (Schlüssel getrennt von der Datenbank)."""
+    if private:
+        from . import privacy
+        content = privacy.encrypt(content)
+    ex("INSERT INTO messages(channel,role,content,ts,private) VALUES(?,?,?,?,?)",
+       (channel, role, content, now(), 1 if private else 0))
 
 
 def history(channel: str, turns: int) -> list[dict]:
+    from . import privacy
     rows = q(
-        "SELECT role,content FROM messages WHERE channel=? ORDER BY id DESC LIMIT ?",
+        "SELECT role,content,private FROM messages WHERE channel=? ORDER BY id DESC LIMIT ?",
         (channel, turns * 2),
     )
     rows.reverse()
+    for r in rows:
+        if r.get("private"):
+            r["content"] = privacy.decrypt(r["content"])
     # Anthropic verlangt: Start mit user, abwechselnde Rollen
     msgs: list[dict] = []
     for r in rows:
         if msgs and msgs[-1]["role"] == r["role"]:
             msgs[-1]["content"] += "\n\n" + r["content"]
+            msgs[-1]["private"] = msgs[-1]["private"] or bool(r.get("private"))
         else:
-            msgs.append({"role": r["role"], "content": r["content"]})
+            msgs.append({"role": r["role"], "content": r["content"], "private": bool(r.get("private"))})
     while msgs and msgs[0]["role"] != "user":
         msgs.pop(0)
     return msgs

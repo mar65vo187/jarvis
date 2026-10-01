@@ -12,14 +12,16 @@ async def run_mission_cycle(m: dict):
     log = db.q("SELECT * FROM mission_log WHERE mission_id=? ORDER BY id DESC LIMIT 15", (m["id"],))
     log.reverse()
     approvals = db.q("SELECT * FROM approvals WHERE mission_id=? ORDER BY id DESC LIMIT 10", (m["id"],))
-    ctx = {"channel": f"mission:{m['id']}", "mission_id": m["id"], "mission_updated": False}
+    ctx = {"channel": f"mission:{m['id']}", "mission_id": m["id"], "mission_updated": False,
+           "private": bool(m.get("private"))}
     db.ex("UPDATE missions SET cycles=cycles+1, next_run=? WHERE id=?",
           (db.now() + config.MISSION_INTERVAL_MIN * 60, m["id"]))
     mission_text = prompts.mission_prompt(m, log, approvals)
     messages = [{"role": "user", "content": mission_text}]
     try:
         council_context = ""
-        if agents.mission_review_due(m.get("cycles", 0)):
+        if (agents.mission_review_due(m.get("cycles", 0)) and config.PRIVACY == "smart"
+                and not ctx.get("private")):  # private Missionen sehen nie externe Spezialisten
             try:
                 council_context = await agents.council(
                     f"Autonome Jarvis-Mission: {m.get('title', '')}\nZiel: {m.get('goal', '')}\n"
@@ -33,6 +35,8 @@ async def run_mission_cycle(m: dict):
         db.ex("INSERT INTO mission_log(mission_id,ts,entry) VALUES(?,?,?)", (m["id"], db.now(), str(e)))
         db.ex("UPDATE missions SET next_run=? WHERE id=?", (next_daily("00:05"), m["id"]))
         return
+    if ctx.get("private") and not m.get("private"):
+        db.ex("UPDATE missions SET private=1 WHERE id=?", (m["id"],))  # einmal privat, immer privat
     if not ctx["mission_updated"]:
         db.ex("INSERT INTO mission_log(mission_id,ts,entry) VALUES(?,?,?)", (m["id"], db.now(), text[:2000]))
 

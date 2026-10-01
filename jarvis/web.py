@@ -30,8 +30,36 @@ async def _notify_hook(text: str, approval_id=None):
 NOTIFY_HOOKS.append(_notify_hook)
 
 
+def _server_secret() -> str:
+    s = db.get_setting("session_secret", "")
+    if not s:
+        import secrets as _s
+        s = _s.token_hex(32)
+        db.set_setting("session_secret", s)
+    return s
+
+
 def _token() -> str:
-    return hashlib.sha256(f"jarvis::{config.JARVIS_PASSWORD}".encode()).hexdigest()
+    """Sitzungs-Token = HMAC(Server-Geheimnis, Passwort). Passwortwechsel meldet alle Geräte ab."""
+    return hmac.new(_server_secret().encode(), f"jarvis::{config.JARVIS_PASSWORD}".encode(), hashlib.sha256).hexdigest()
+
+
+_fails: dict[str, list[float]] = {}
+
+
+def _client_ip(req: Request) -> str:
+    # Hinter Caddy (nur Server-Modus) steht die echte IP im X-Forwarded-For-Header.
+    if config.SERVER:
+        fwd = req.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+    return req.client.host if req.client else "?"
+
+
+def _locked(ip: str) -> bool:
+    now = time.time()
+    _fails[ip] = [t for t in _fails.get(ip, []) if now - t < 900]
+    return len(_fails[ip]) >= 5
 
 
 def _runtime_provider() -> str:
@@ -105,9 +133,16 @@ async def static_file(req):
 
 
 async def login(req: Request):
+    ip = _client_ip(req)
+    if _locked(ip):
+        return JSONResponse({"error": "Zu viele Fehlversuche – 15 Minuten gesperrt."}, status_code=429)
     body = await _json(req)
-    if config.JARVIS_PASSWORD and hmac.compare_digest(str(body.get("password", "")), config.JARVIS_PASSWORD):
+    if config.JARVIS_PASSWORD and hmac.compare_digest(str(body.get("password", "")).encode(),
+                                                       config.JARVIS_PASSWORD.encode()):
+        _fails.pop(ip, None)
         return JSONResponse({"token": _token(), "name": config.OWNER_NAME, "title": config.OWNER_TITLE})
+    _fails.setdefault(ip, []).append(time.time())
+    db.log_action("login", f"Fehlversuch von {ip}")
     return _deny()
 
 
@@ -178,6 +213,9 @@ async def state(req: Request):
                   "provider_usage": status.get("usage", "")},
         "ollama": {k: v for k, v in config.OLLAMA_STATUS.items() if k != "checked"},
         "notaus": guard.stopped(),
+        "privacy": config.PRIVACY,
+        "knowledge": __import__("jarvis.knowledge", fromlist=["stats"]).stats(),
+        "fallback": {k: v for k, v in config.FALLBACK_STATUS.items() if k != "ts"},
         "full_access": config.FULL_ACCESS,
         "skills": (db.one("SELECT COUNT(*) c FROM skills WHERE status='active'") or {"c": 0})["c"],
         "voice": voice.enabled(),
@@ -249,6 +287,8 @@ async def app_config(req: Request):
         "name": config.OWNER_NAME, "title": config.OWNER_TITLE, "info": config.OWNER_INFO,
         "model": config.MODEL, "vision": config.VISION_MODEL,
         "provider": config.PROVIDER, "active_provider": config.active_provider(),
+        "privacy": config.PRIVACY, "learn": config.LEARN_FROM_CLOUD, "fallback_local": config.FALLBACK_LOCAL,
+        "server": config.SERVER,
         "cloud_enabled": config.CLOUD_ENABLED,
         "xkiro_model": config.XKIRO_MODEL, "xkiro_key_set": bool(config.XKIRO_API_KEY),
         "xkiro_reasoning": config.XKIRO_REASONING_EFFORT,
@@ -277,11 +317,12 @@ SETUP_KEYS = {"TELEGRAM_BOT_TOKEN", "OWNER_NAME", "OWNER_TITLE", "OWNER_INFO", "
               "JARVIS_AGENT_USE_XKIRO", "JARVIS_AGENT_USE_HF", "JARVIS_AGENT_USE_OLLAMA",
               "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY", "JARVIS_UPGRADE_INTERVAL_HOURS",
               "JARVIS_UPGRADE_MAX_CHILDREN",
-              "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD"}
+              "ANTHROPIC_API_KEY", "CLAUDE_MODEL", "CLAUDE_DAILY_BUDGET_USD",
+              "JARVIS_PRIVACY", "JARVIS_LEARN", "JARVIS_FALLBACK_LOCAL"}
 
 
 async def setup(req: Request):
-    if not _is_local(req):
+    if not (_is_local(req) or (config.SERVER and _authed(req))):
         return _deny()
     body = await _json(req)
     vals = {k: str(v).strip().replace("\n", " ").replace("\r", "") for k, v in body.items()
@@ -362,12 +403,22 @@ async def health(req):
                          "runtime_model": _runtime_model()})
 
 
+def _allowed_hosts() -> list[str]:
+    hosts = ["127.0.0.1", "localhost", "[::1]"]
+    if config.SERVER:  # online: die öffentliche bzw. Tailscale-Adresse
+        from urllib.parse import urlsplit
+        h = urlsplit(config.PUBLIC_BASE_URL).hostname
+        if h:
+            hosts.append(h)
+    return hosts
+
+
 async def bad_request(req, exc):
     return JSONResponse({"error": "Ungültige JSON-Anfrage."}, status_code=400)
 
 
 app = Starlette(exception_handlers={ValueError: bad_request, TypeError: bad_request},
-                middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])], routes=[
+                middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts())], routes=[
     Route("/", index),
     Route("/health", health),
     Route("/api/config", app_config),

@@ -290,6 +290,11 @@ async def _run_one(spec: AgentSpec, task: str, candidates: list[dict], peer_cont
 async def council(task: str) -> str:
     """Run a bounded specialist council and return context for the master Jarvis."""
     started = time.perf_counter()
+    from . import privacy
+    # Privatsphäre: Spezialisten (externe Cloud-Modelle) bekommen nie private Inhalte
+    if config.PRIVACY == "strikt" or privacy.sensitive_findings(task):
+        LAST_RUN.update(ts=time.time(), used=False, task_type=task_type(task), agents=[], duration_ms=0, errors=0)
+        return ""
     if not should_use_council(task):
         LAST_RUN.update(ts=time.time(), used=False, task_type=task_type(task), agents=[], duration_ms=0, errors=0)
         return ""

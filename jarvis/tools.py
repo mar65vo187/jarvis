@@ -97,8 +97,14 @@ TOOL_SCHEMAS = [
     _t("publish_page", "Veröffentlicht eine komplette HTML-Seite öffentlich unter <PUBLIC_BASE_URL>/s/<slug>/. "
                        "Für Landingpages, Angebote, Portfolios. Gibt die URL zurück.",
        {"slug": S, "html": S}, ["slug", "html"]),
-    _t("remember", "Speichert dauerhaftes Wissen über den Owner/sein Business.",
-       {"topic": S, "content": S}, ["topic", "content"]),
+    _t("remember", "Speichert dauerhaftes Wissen über den Owner/sein Business. privat=true (Standard) für alles "
+                   "Persönliche: wird verschlüsselt und NUR von der lokalen KI gesehen. privat=false nur für "
+                   "öffentliche Geschäftsinfos.",
+       {"topic": S, "content": S, "privat": {"type": "boolean"}}, ["topic", "content"]),
+    _t("ask_teacher", "Fragt eine starke Cloud-KI als LEHRER – nur mit einer allgemeinen Frage ohne Namen, "
+                      "Kontaktdaten oder private Details (wird geprüft). Die Antwort wird dauerhaft in deinem "
+                      "eigenen Wissen gespeichert. In privaten Aufgaben muss der Owner die Frage freigeben.",
+       {"question": S}, ["question"]),
     _t("recall", "Durchsucht das Langzeitgedächtnis.", {"query": S}, ["query"]),
     _t("forget", "Löscht einen Gedächtnis-Eintrag per ID.", {"id": I}, ["id"]),
     _t("mission_create", "Startet eine autonome Hintergrund-Mission, die so lange weiterläuft, bis das Ziel erreicht ist.",
@@ -370,16 +376,67 @@ async def publish_page(slug: str, html: str, **_):
     return f"Veröffentlicht: {url}"
 
 
-async def remember(topic: str, content: str, **_):
-    i = db.ex("INSERT INTO memory(topic,content,ts) VALUES(?,?,?)", (topic, content, db.now()))
-    return f"Gemerkt (#{i})."
+async def remember(topic: str, content: str, privat: bool = True, **_):
+    from . import privacy
+    stored = privacy.encrypt(content) if privat else content
+    i = db.ex("INSERT INTO memory(topic,content,ts,private) VALUES(?,?,?,?)",
+              (topic, stored, db.now(), 1 if privat else 0))
+    return f"Gemerkt (#{i}, {'privat/verschlüsselt' if privat else 'öffentlich'})."
 
 
 async def recall(query: str, **_):
+    from . import privacy
     words = [w for w in re.split(r"\W+", query.lower()) if len(w) > 2][:6] or [query.lower()]
-    cond = " OR ".join(["lower(content||' '||topic) LIKE ?"] * len(words))
-    rows = db.q(f"SELECT * FROM memory WHERE {cond} ORDER BY id DESC LIMIT 30", tuple(f"%{w}%" for w in words))
-    return "\n".join(f"#{r['id']} [{r['topic']}] {r['content']}" for r in rows) or "Nichts gefunden."
+    out = []
+    for r in db.q("SELECT * FROM memory ORDER BY id DESC LIMIT 2000"):
+        text = privacy.decrypt(r["content"])
+        if any(w in (text + " " + r["topic"]).lower() for w in words):
+            out.append(f"#{r['id']} [{r['topic']}] {text}")
+            if len(out) >= 30:
+                break
+    return "\n".join(out) or "Nichts gefunden."
+
+
+def teacher_provider() -> str | None:
+    """Cloud-KI, die als Lehrer gefragt werden darf (unabhängig vom Privatsphäre-Modus)."""
+    if not config.CLOUD_ENABLED:
+        return None
+    p = config.active_provider()
+    if p != "ollama":
+        return p
+    if config.XKIRO_API_KEY:
+        return "xkiro"
+    if config.ANTHROPIC_API_KEY:
+        return "claude"
+    return None
+
+
+async def ask_teacher(question: str, _ctx=None, **_):
+    from . import brain, knowledge, privacy
+    question = (question or "").strip()
+    if not question:
+        return "Keine Frage angegeben."
+    provider = teacher_provider()
+    if not provider:
+        return "Kein Lehrer verfügbar (Cloud gesperrt oder kein API-Schlüssel). Arbeite mit eigenem Wissen weiter."
+    found = privacy.sensitive_findings(question)
+    if found:
+        return ("BLOCKIERT – die Frage enthält persönliche Daten (" + ", ".join(found) + "). Formuliere sie "
+                "allgemein, ohne Namen, Kontaktdaten oder private Details, und frage erneut.")
+    if _ctx and _ctx.get("private"):  # Aufgabe hat private Daten berührt → Owner sieht die Frage vorher
+        ok, msg = await guard.require_approval(
+            "action", f"Lehrer-Frage an {config.provider_label(provider)} senden (nur diese Frage, kein Verlauf):",
+            question[:1500], ctx=_ctx)
+        if not ok:
+            return msg
+    resp = await brain._cloud_call(provider, [
+        {"role": "system", "content": "Du bist ein Lehrer für einen persönlichen KI-Assistenten. Antworte auf Deutsch, "
+                                      "sachlich, vollständig und allgemein gültig, mit konkreten Schritten."},
+        {"role": "user", "content": question}], None, 2000, None)
+    answer = ((resp.get("message") or {}).get("content") or "").strip()
+    kid = knowledge.learn(question, answer, config.provider_label(provider))
+    db.log_action("lehrer", f"{config.provider_label(provider)}: {question[:120]}" + (f" → Wissen #{kid}" if kid else ""))
+    return answer or "Der Lehrer hat keine Antwort geliefert."
 
 
 async def forget(id: int, **_):
@@ -623,7 +680,7 @@ HANDLERS = {
     "skill_create": skill_create, "skill_list": skill_list, "skill_rollback": skill_rollback,
     "fetch_url": fetch_url, "http_request": http_request, "get_secret": get_secret, "shell": shell,
     "write_file": write_file, "read_file": read_file, "publish_page": publish_page,
-    "remember": remember, "recall": recall, "forget": forget,
+    "remember": remember, "recall": recall, "forget": forget, "ask_teacher": ask_teacher,
     "mission_create": mission_create, "mission_update": mission_update, "mission_list": mission_list,
     "mission_log": mission_log, "schedule_create": schedule_create, "schedule_list": schedule_list,
     "schedule_delete": schedule_delete, "notify_owner": notify_owner, "ask_owner": ask_owner,
@@ -631,7 +688,7 @@ HANDLERS = {
     "stripe_revenue": stripe_revenue, "budget_status": budget_status,
 }
 CTX_TOOLS = {"mission_create", "mission_update", "ask_owner", "shell", "write_file", "delete_path",
-             "move_path", "skill_create"}
+             "move_path", "skill_create", "ask_teacher"}
 # Werkzeuge, die jederzeit laufen dürfen, auch bei NOTAUS (nur lesen / informieren).
 READ_ONLY = {"web_search", "fetch_url", "read_file", "list_dir", "search_files", "recall", "mission_list",
              "mission_log", "schedule_list", "skill_list", "notify_owner", "ask_owner", "get_secret",
@@ -667,12 +724,30 @@ async def run_tool(name: str, args: dict, ctx: dict) -> tuple:
         return f"Unbekanntes Tool {name}", True
     if guard.stopped() and name not in READ_ONLY:
         return "NOTAUS aktiv – Aktion blockiert. Owner muss /weiter senden.", True
+    from . import privacy
+    ctx = ctx if ctx is not None else {}
+    # Ausgangsschleuse: in privaten Aufgaben verlässt nichts Persönliches Jarvis
+    if name in privacy.OUTBOUND_TOOLS and privacy.must_stay_local(ctx=ctx):
+        payload = json.dumps({k: v for k, v in args.items() if not k.startswith("_")}, ensure_ascii=False)
+        if name in ("web_search", "fetch_url"):
+            found = privacy.sensitive_findings(payload)
+            if found:
+                return ("BLOCKIERT (Privatsphäre): Suchanfrage/Adresse enthält persönliche Daten (" + ", ".join(found)
+                        + "). Suche allgemein formulieren."), True
+        elif name in privacy.OUTBOUND_NEEDS_APPROVAL:
+            ok, msg = await guard.require_approval(
+                "action", f"PRIVATE Aufgabe: Daten mit „{name}“ nach draußen senden?", payload[:1800], ctx=ctx)
+            if not ok:
+                return msg, True
     try:
         if name in CTX_TOOLS:
             args = {**args, "_ctx": ctx}
         else:
             args = {k: v for k, v in args.items() if not k.startswith("_")}
         res = await fn(**args)
+        # Markierung: Ergebnisse aus privaten Quellen (und eigene Skills) machen die Aufgabe privat
+        if name in privacy.PRIVATE_SOURCE_TOOLS or name not in HANDLERS:
+            ctx["private"] = True
         if isinstance(res, list):  # z.B. Screenshot: Text + Bild
             return res, False
         return (res if isinstance(res, str) else json.dumps(res, ensure_ascii=False)), False

@@ -58,7 +58,9 @@ HELP = ("Schreib oder sprich einfach mit mir.\n\n"
         "/status – Lage\n/missionen – alle Missionen\n/log <id> – Missionslog\n"
         "/pause <id> · /weiter <id> · /stopp <id>\n/ja <id> [notiz] · /nein <id> [notiz]\n"
         "/plan – geplante Aufgaben\n/skills – selbstgebaute Fähigkeiten\n/agenten – Agentenrat & Child-Agenten\n/upgrade – neuen Child-Agent benchmarken\n/screenshot – was ist am PC los\n"
-        "/notaus – sofort ALLES stoppen · /weiter – NOTAUS aufheben\n/neu – Gespräch neu beginnen")
+        "/notaus – sofort ALLES stoppen · /weiter – NOTAUS aufheben\n/neu – Gespräch neu beginnen\n"
+        "/wissen – was Jarvis schon gelernt hat\n/privat <Text> – Nachricht nur von deiner eigenen KI bearbeiten lassen\n"
+        "Hinweis: Telegram selbst kann Bot-Chats lesen – sehr Privates lieber im Jarvis-Fenster.")
 
 def _api_url() -> str:
     return f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}"
@@ -157,6 +159,11 @@ async def _command(chat_id: int, text: str) -> bool:
     elif cmd == "/upgrade":
         await send(chat_id, "🧬 Starte Agent-Factory + Benchmark …")
         await send(chat_id, await upgrades.run_cycle(focus=(arg if arg in ('code','research','business','general') else 'auto'), manual=True))
+    elif cmd == "/wissen":
+        from . import knowledge
+        st = knowledge.stats()
+        await send(chat_id, f"🧠 Eigenes Wissen: {st['entries']} Einträge, {st['uses']}× genutzt.\n"
+                            f"Privatsphäre: {config.PRIVACY.upper()} – Wissen herein, Privates nie hinaus.")
     elif cmd == "/screenshot":
         from . import pc
         if not pc.AVAILABLE:

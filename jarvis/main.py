@@ -52,7 +52,8 @@ async def check_ollama(start_if_needed: bool = True) -> dict:
             return OLLAMA_STATUS
         except Exception as e:
             OLLAMA_STATUS.update(ok=False, model_ok=False, msg=f"Ollama nicht erreichbar: {e}")
-            exe = _ollama_exe() if (start_if_needed and attempt == 0) else None
+            # Auf dem Server verwaltet systemd Ollama – dort nie selbst starten.
+            exe = _ollama_exe() if (start_if_needed and attempt == 0 and not config.SERVER) else None
             if not exe:
                 break
             print("Starte Ollama …")
@@ -91,7 +92,9 @@ async def _forever(name: str, factory):
 
 
 async def main():
-    print(f"J.A.R.V.I.S. startet | {config.active_provider()} | Modell {config.active_model()}")
+    mode = f"ONLINE ({config.PUBLIC_BASE_URL})" if config.SERVER else "lokal"
+    print(f"J.A.R.V.I.S. startet {mode} | {config.provider_label()} | Modell {config.active_model()} | "
+          f"Privatsphäre: {config.PRIVACY}")
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=config.PORT, log_level="warning",
                                            proxy_headers=False))
     services = [asyncio.create_task(_forever("KI-Status", monitor_provider)),
@@ -114,6 +117,9 @@ async def main():
 
 async def check_provider(start_if_needed=False):
     provider = config.active_provider()
+    if provider != "ollama":
+        # Lokale KI immer mitprüfen: sie verarbeitet private Aufgaben und springt bei Cloud-Ausfall ein
+        await check_ollama(start_if_needed=start_if_needed)
     if provider == "claude":
         return await claude.check()
     if provider == "xkiro":

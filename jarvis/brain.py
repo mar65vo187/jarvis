@@ -1,4 +1,10 @@
-"""Agent-Schleife mit austauschbarem Claude-/Ollama-Gehirn und Werkzeugen."""
+"""Agent-Schleife mit austauschbarem Gehirn (xKiro, Claude oder lokale KI/Ollama) und Werkzeugen.
+
+Privatsphäre (siehe privacy.py): Private Aufgaben – und im Modus „strikt“ alle – laufen nur über die
+lokale KI. Cloud-KIs dienen dann nur noch als Lehrer für allgemeine Fragen; ihr Wissen fließt in den
+eigenen Wissensspeicher (knowledge.py). Bei vorübergehendem Cloud-Ausfall arbeitet Jarvis (wenn erlaubt)
+im selben Verlauf mit der lokalen KI weiter, ohne bereits ausgeführte Werkzeuge zu wiederholen.
+"""
 import asyncio
 import json
 import re
@@ -6,7 +12,8 @@ from typing import Any
 
 import httpx
 
-from . import agents, claude, config, db, huggingface, prompts, xkiro
+from . import agents, claude, config, db, huggingface, knowledge, privacy, prompts, xkiro
+from .errors import PrivacyBlocked
 from .tools import all_schemas, run_tool
 
 
@@ -48,7 +55,8 @@ def _provider_chain() -> list[str]:
         chain.append("huggingface")
     if config.ANTHROPIC_API_KEY:
         chain.append("claude")
-    chain.append("ollama")
+    if config.FALLBACK_LOCAL or not chain:
+        chain.append("ollama")
     return chain
 
 
@@ -62,8 +70,56 @@ async def _call_provider(provider: str, messages, tools=None, max_tokens=None, m
     return await _ollama_call(messages, tools, max_tokens, model)
 
 
+LAST_ROUTE: dict = {"provider": "", "private": False}
+
+
+def _keep_alive():
+    """Ollama erwartet Dauer-Text ("5m") oder Zahl (Sekunden, -1 = immer geladen)."""
+    ka = str(config.KEEP_ALIVE).strip()
+    try:
+        return int(ka)
+    except ValueError:
+        return ka
+
+
+async def _cloud_call(provider, messages, tools, max_tokens, model):
+    """Direkter Aufruf einer Cloud-KI (nur für Lehrer-Fragen ohne private Daten)."""
+    return await _call_provider(provider, messages, tools, max_tokens, model)
+
+
+async def _local_only(messages, tools, max_tokens, model, provider):
+    """Privatsphäre: private Inhalte (und im Modus „strikt“ alles) nur über die lokale KI."""
+    has_images = any(m.get("images") for m in messages)
+    if has_images:
+        model = model if provider == "ollama" and model else config.VISION_MODEL
+        if not model:
+            raise PrivacyBlocked("Bilder werden nur lokal ausgewertet, es ist aber kein lokales Seh-Modell "
+                                 "(JARVIS_VISION_MODEL) eingerichtet.")
+    elif provider != "ollama":
+        model = None
+    if provider != "ollama":
+        messages = _fit_context([dict(m) for m in messages], tools or [], local=True)
+    try:
+        resp = await _ollama_call(messages, tools, max_tokens, model)
+    except RuntimeError as e:
+        if provider != "ollama":
+            raise PrivacyBlocked(f"Private Daten bleiben bei deiner eigenen KI – die lokale KI ist aber gerade "
+                                 f"nicht bereit ({e}). Nichts wurde an eine Cloud gesendet.") from None
+        raise
+    LAST_PROVIDER.update(provider="ollama", model=model or config.MODEL, error="")
+    LAST_ROUTE.update(provider="ollama")
+    return resp
+
+
 async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
-                model: str | None = None) -> dict:
+                model: str | None = None, private: bool = False) -> dict:
+    # Privatsphäre zuerst (Einbahnstraße): private Inhalte, Bilder und Modus „strikt“ → nur lokal.
+    provider = config.active_provider()
+    has_images = any(m.get("images") for m in messages)
+    local_only = private or privacy.must_stay_local(messages) or has_images
+    LAST_ROUTE.update(private=local_only)
+    if local_only:
+        return await _local_only(messages, tools, max_tokens, model, provider)
     # An explicit model belongs to the selected provider (e.g. vision); never send
     # that provider-specific ID to a different API. Normal master calls in AUTO
     # mode are safe to fail over because a failed model request has not executed
@@ -79,6 +135,7 @@ async def _call(messages: list[dict], tools: list[dict] | None = None, max_token
                              config.HF_MODEL if provider == "huggingface" else
                              config.CLAUDE_MODEL if provider == "claude" else config.MODEL)
             LAST_PROVIDER.update(provider=provider, model=runtime_model, error="")
+            LAST_ROUTE.update(provider=provider)
             return result
         except Exception as exc:
             errors.append(f"{provider}: {str(exc)[:220]}")
@@ -102,7 +159,7 @@ async def _ollama_request(messages, tools=None, max_tokens=None, model=None):
         "model": model,
         "messages": messages,
         "stream": False,
-        "keep_alive": config.KEEP_ALIVE,
+        "keep_alive": _keep_alive(),
         "options": {"num_predict": max_tokens or config.MAX_TOKENS, "temperature": config.TEMPERATURE,
                     "num_ctx": config.NUM_CTX},
     }
@@ -155,18 +212,15 @@ VISION_PROMPT = (
 
 
 async def describe_image(b64: str, w: int = 0, h: int = 0, question: str = "") -> str:
-    """Lässt das optionale lokale Seh-Modell ein Bild beschreiben. Ohne Seh-Modell: ehrlicher Hinweis."""
-    provider = config.active_provider()
-    if provider == "ollama" and not config.VISION_MODEL:
+    """Bilder (Bildschirm, Fotos) sind privat: nur das LOKALE Seh-Modell beschreibt sie."""
+    if not config.VISION_MODEL:
         return ("[Bild vorhanden, aber kein Seh-Modell eingerichtet. Ohne JARVIS_VISION_MODEL kann ich den Inhalt "
                 "nicht sehen – nutze stattdessen windows/clipboard/PowerShell oder bitte den Owner.]")
     if provider == "huggingface" and not config.HF_VISION_MODEL:
         return ("[Bild vorhanden, aber für Hugging Face ist kein HF_VISION_MODEL eingerichtet. "
                 "Wähle ein VLM oder nutze xKiro/Claude bzw. ein lokales Seh-Modell.]")
     prompt = VISION_PROMPT.format(w=w or "?", h=h or "?") + (f"\nZusatzfrage: {question}" if question else "")
-    vision_model = (config.CLAUDE_MODEL if provider == "claude" else
-                    config.XKIRO_MODEL if provider == "xkiro" else
-                    config.HF_VISION_MODEL if provider == "huggingface" else config.VISION_MODEL)
+    vision_model = config.VISION_MODEL
     try:
         resp = await _call([{"role": "user", "content": prompt, "images": [b64]}], tools=None,
                            max_tokens=1200, model=vision_model)
@@ -198,12 +252,14 @@ def _est_tokens(obj) -> int:
     return int(len(json.dumps(obj, ensure_ascii=False)) / 3.2) + 1
 
 
-def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
+def _fit_context(msgs: list[dict], tools: list[dict], local: bool = False) -> list[dict]:
     """Hält Systemprompt + Werkzeuge + Verlauf im Kontextfenster (wichtig bei wenig RAM / kleinem num_ctx).
     Reihenfolge: alte Werkzeug-Ergebnisse kürzen → älteste Nachrichten entfernen. Systemprompt und
     die aktuelle Anfrage bleiben immer erhalten."""
-    provider = config.active_provider()
-    if config.PROVIDER == "auto":
+    provider = "ollama" if local else config.active_provider()
+    if local:
+        ctx, output = config.NUM_CTX, config.MAX_TOKENS
+    elif config.PROVIDER == "auto":
         # AUTO promises failover, so fit to the smallest configured fallback
         # instead of preparing a 200k cloud context that local Ollama cannot accept.
         windows = [(config.NUM_CTX, config.MAX_TOKENS)]
@@ -246,8 +302,18 @@ def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
 
 async def think(messages: list, ctx: dict, extra_system: str = "", max_steps: int | None = None,
                 on_tool=None) -> str:
-    system = prompts.system_prompt(extra_system)
     history = [dict(m) for m in messages]
+    ctx = ctx if ctx is not None else {}
+    if any(m.get("private") for m in history):  # „privat“ = es sind private DATEN im Spiel
+        ctx["private"] = True
+    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    learned = knowledge.context_block(str(last_user))  # eigenes Wissen (nur herein)
+
+    def _system(local: bool) -> str:
+        extra = "\n\n".join(x for x in (extra_system, learned) if x)
+        return prompts.system_prompt(extra, local=local)
+
+    system = _system(privacy.must_stay_local(history, ctx) or config.active_provider() == "ollama")
     # Uhrzeit NICHT in den Systemprompt (sonst ändert er sich jede Minute und Ollama kann den
     # vorberechneten Anfang nicht wiederverwenden → auf schwachen PCs deutlich langsamer).
     for m in reversed(history):
@@ -259,8 +325,13 @@ async def think(messages: list, ctx: dict, extra_system: str = "", max_steps: in
     max_steps = max_steps or config.CHAT_MAX_STEPS
     final_text = ""
 
-    for _step in range(max_steps):
-        ollama_messages = _fit_context(ollama_messages, tools)
+    for step in range(max_steps):
+        if ctx.get("private"):  # Markierung wandert mit dem Verlauf – _call sieht sie in jeder Nachricht
+            for m in ollama_messages:
+                m["private"] = True
+        local = privacy.must_stay_local(ollama_messages, ctx) or config.active_provider() == "ollama"
+        ollama_messages[0] = {"role": "system", "content": _system(local), "private": bool(ctx.get("private"))}
+        ollama_messages = _fit_context(ollama_messages, tools, local=local)
         resp = await _call(ollama_messages, tools=tools)
         msg = resp.get("message") or {}
         content = _THINK_RE.sub("", msg.get("content") or "").strip()
@@ -297,11 +368,13 @@ async def think(messages: list, ctx: dict, extra_system: str = "", max_steps: in
             if is_err:
                 result = "FEHLER: " + result
             ollama_messages.append({"role": "tool", "content": result, "tool_name": name,
-                                    "tool_call_id": call.get("id"), "is_error": is_err})
+                                    "tool_call_id": call.get("id"), "is_error": is_err,
+                                    "private": bool(ctx.get("private"))})
     else:
         ollama_messages.append({"role": "user", "content":
                                 "Schrittlimit erreicht. Fasse kurz zusammen, was erledigt ist und was offen bleibt."})
-        resp = await _call(_fit_context(ollama_messages, []), tools=None, max_tokens=800)
+        local = privacy.must_stay_local(ollama_messages, ctx) or config.active_provider() == "ollama"
+        resp = await _call(_fit_context(ollama_messages, [], local=local), tools=None, max_tokens=800)
         final_text = _THINK_RE.sub("", (resp.get("message") or {}).get("content") or final_text).strip()
 
     return final_text or "Die KI hat keine abschließende Antwort geliefert. Prüfe den Aufgabenstatus."
@@ -313,18 +386,30 @@ _locks: dict[str, asyncio.Lock] = {}
 async def chat(channel: str, text: str, on_tool=None) -> str:
     lock = _locks.setdefault(channel, asyncio.Lock())
     async with lock:
+        explicit = privacy.explicit_private(text)
+        text = privacy.strip_prefix(text) if explicit else text
+        private_in = explicit or bool(privacy.sensitive_findings(text))
         msgs = db.history(channel, config.HISTORY_TURNS)
-        msgs.append({"role": "user", "content": text})
+        msgs.append({"role": "user", "content": text, "private": private_in})
+        ctx = {"channel": channel}
+        if any(m.get("private") for m in msgs):
+            ctx["private"] = True
         try:
             council_context = ""
-            try:
-                council_context = await agents.council(text)
-            except Exception:
-                # Specialist failure must never take the master Jarvis offline.
-                council_context = ""
-            reply = await think(msgs, {"channel": channel}, extra_system=council_context, on_tool=on_tool)
+            if not ctx.get("private") and config.PRIVACY == "smart":  # Spezialisten nur für Nicht-Privates
+                try:
+                    council_context = await agents.council(text)
+                except Exception:
+                    # Specialist failure must never take the master Jarvis offline.
+                    council_context = ""
+            reply = await think(msgs, ctx, extra_system=council_context, on_tool=on_tool)
         except Exception as e:
             reply = f"KI konnte die Anfrage nicht ausführen: {e}"
-        db.add_message(channel, "user", text)
-        db.add_message(channel, "assistant", reply)
+        private = bool(ctx.get("private"))
+        db.add_message(channel, "user", text, private=private)
+        db.add_message(channel, "assistant", reply, private=private)
+        # Wissen HEREIN: gute Cloud-Antworten auf nicht-private Fragen werden Jarvis' eigenes Wissen
+        if (not private and config.LEARN_FROM_CLOUD and LAST_ROUTE.get("provider") in ("xkiro", "huggingface", "claude")
+                and len(reply) >= 200 and not reply.startswith("KI konnte")):
+            knowledge.learn(text, reply, config.provider_label(LAST_ROUTE["provider"]))
         return reply

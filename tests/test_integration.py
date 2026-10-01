@@ -22,6 +22,8 @@ class Integration(unittest.TestCase):
         self.env_file = config.ENV_FILE
         config.ENV_FILE = Path(self.tmp.name) / '.env'
         os.environ['JARVIS_PROVIDER'] = 'auto'
+        # Diese Tests prüfen das Cloud-Protokoll → Privatsphäre-Modus „smart“ (Standard ist „strikt“)
+        os.environ['JARVIS_PRIVACY'] = 'smart'
         for key in ('ANTHROPIC_API_KEY', 'CLAUDE_API_KEY', 'CLAUDE_DAILY_BUDGET_USD', 'CLAUDE_MODEL', 'CLAUDE_PRICE_IN', 'CLAUDE_PRICE_OUT',
                     'XKIRO_API_KEY', 'XKIRO_MODEL', 'XKIRO_REASONING_EFFORT', 'JARVIS_CLOUD_ENABLED',
                     'HF_TOKEN', 'HUGGINGFACE_TOKEN', 'HF_MODEL', 'HF_VISION_MODEL', 'HF_POLICY',
@@ -137,20 +139,16 @@ class Integration(unittest.TestCase):
         self.assertEqual([b['tool_use_id'] for b in result[-1]['content']], ['a', 'b'])
         self.assertTrue(result[-1]['content'][1]['is_error'])
 
-    def test_claude_image_does_not_require_ollama_vision(self):
+    def test_images_never_go_to_cloud(self):
+        """Geändert (Claude, Privatsphäre): Bildschirm/Fotos sind privat und werden nur lokal ausgewertet."""
         self.provider()
 
         def respond(req):
-            payload = json.loads(req.content)
-            content = payload['messages'][0]['content']
-            self.assertEqual(content[1]['source']['data'], 'AAAA')
-            self.assertEqual(content[1]['type'], 'image')
-            self.assertEqual(payload['model'], config.CLAUDE_MODEL)
-            return httpx.Response(200, json={'content': [{'type': 'text', 'text': 'Ein Bild.'}], 'usage': {}})
+            raise AssertionError('Bild darf nicht an Claude gesendet werden')
 
         config.VISION_MODEL = ''
         with self.fake_api(respond):
-            self.assertIn('Ein Bild.', asyncio.run(brain.describe_image('AAAA')))
+            self.assertIn('kein Seh-Modell', asyncio.run(brain.describe_image('AAAA')))
 
     def test_missing_key_stops_before_network_call(self):
         os.environ['JARVIS_PROVIDER'] = 'claude'
@@ -284,7 +282,8 @@ class Integration(unittest.TestCase):
                 return httpx.Response(200, json={'choices': [{'finish_reason': 'tool_calls', 'message': {
                     'role': 'assistant', 'content': None, 'tool_calls': [{
                         'id': 'call_1', 'type': 'function',
-                        'function': {'name': 'list_dir', 'arguments': '{}'}
+                        # nicht-privates Werkzeug: list_dir würde die Aufgabe (richtigerweise) lokal machen
+                        'function': {'name': 'schedule_list', 'arguments': '{}'}
                     }]}}], 'usage': {'prompt_tokens': 10, 'completion_tokens': 4}})
             self.assertEqual(payload['messages'][-1]['role'], 'tool')
             self.assertEqual(payload['messages'][-1]['tool_call_id'], 'call_1')

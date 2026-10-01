@@ -4,11 +4,15 @@ from datetime import datetime
 from . import config, db
 
 
-def _memory_block() -> str:
-    rows = db.q("SELECT id,topic,content FROM memory ORDER BY id DESC LIMIT 60")
+def _memory_block(include_private: bool = True) -> str:
+    """Privates Gedächtnis nur, wenn die Antwort von der LOKALEN KI kommt."""
+    from . import privacy
+    sql = "SELECT id,topic,content,private FROM memory " + ("" if include_private else "WHERE private=0 ") + \
+          "ORDER BY id DESC LIMIT 60"
+    rows = db.q(sql)
     if not rows:
-        return "(noch leer)"
-    return "\n".join(f"- [#{r['id']} {r['topic']}] {r['content']}" for r in reversed(rows))
+        return "(noch leer)" if include_private else "(private Einträge nur bei lokaler Verarbeitung sichtbar)"
+    return "\n".join(f"- [#{r['id']} {r['topic']}] {privacy.decrypt(r['content'])}" for r in reversed(rows))
 
 
 def _missions_block() -> str:
@@ -63,7 +67,7 @@ def now_str() -> str:
     return f"{_WOCHENTAG[n.weekday()]}, {n.strftime('%d.%m.%Y %H:%M')} ({config.TIMEZONE.key})"
 
 
-def system_prompt(extra: str = "") -> str:
+def system_prompt(extra: str = "", local: bool = True) -> str:
     t = config.OWNER_TITLE
     return f"""Du bist J.A.R.V.I.S. – die persönliche, autonome KI von {config.OWNER_NAME}. Du bist kein Chatbot, du bist ein Operator: Du denkst strategisch, handelst selbstständig, lieferst Ergebnisse und berichtest knapp. Stil: souverän, loyal, präzise, trockener britischer Humor wie Jarvis aus Iron Man. Du sprichst {config.OWNER_NAME} mit "{t}" an. Sprache: Deutsch.
 
@@ -76,7 +80,7 @@ DEINE FÄHIGKEITEN:
 {capabilities()}
 
 LANGZEITGEDÄCHTNIS (was du über {config.OWNER_NAME} und seine Welt weißt):
-{_memory_block()}
+{_memory_block(include_private=local)}
 
 LAUFENDE MISSIONEN:
 {_missions_block()}
@@ -111,6 +115,11 @@ SELBSTENTWICKLUNG:
 - Nach der Freigabe steht der Skill dir dauerhaft als Werkzeug zur Verfügung. Geht er kaputt: skill_rollback.
 
 WERKZEUG-DISZIPLIN: Rufe Werkzeuge mit echten Argumenten auf, lies das Ergebnis, dann entscheide den nächsten Schritt. Erfinde keine Ergebnisse.
+
+PRIVATSPHÄRE – EINBAHNSTRASSE (im Code erzwungen, Modus: {config.PRIVACY}):
+- Wissen darf HEREIN, private Daten nie HINAUS. Private Daten von {config.OWNER_NAME} (Dateien, Chats, Mails, Bildschirm, Kontakte, Gedächtnis) verarbeitet nur die lokale KI und sie gehen nur an {t}.
+- Brauchst du Fachwissen, das du nicht hast: ask_teacher mit einer ALLGEMEINEN Frage – ohne Namen, Kontaktdaten oder private Details. Die Antwort wird dein eigenes Wissen.
+- Persönliches mit remember(privat=true) speichern (verschlüsselt). privat=false nur für öffentliche Geschäftsinfos.
 
 ANTWORTEN: Kurz und klar. Erst das Ergebnis, dann max. 3 Zeilen Details. Wenn du Arbeit im Hintergrund gestartet hast, sag das in einem Satz.
 {extra}"""
