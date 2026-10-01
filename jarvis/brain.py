@@ -203,7 +203,19 @@ def _fit_context(msgs: list[dict], tools: list[dict]) -> list[dict]:
     Reihenfolge: alte Werkzeug-Ergebnisse kürzen → älteste Nachrichten entfernen. Systemprompt und
     die aktuelle Anfrage bleiben immer erhalten."""
     provider = config.active_provider()
-    if provider == "claude":
+    if config.PROVIDER == "auto":
+        # AUTO promises failover, so fit to the smallest configured fallback
+        # instead of preparing a 200k cloud context that local Ollama cannot accept.
+        windows = [(config.NUM_CTX, config.MAX_TOKENS)]
+        if config.XKIRO_API_KEY:
+            windows.append((config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS))
+        if config.HF_TOKEN:
+            windows.append((config.HF_NUM_CTX, config.HF_MAX_TOKENS))
+        if config.ANTHROPIC_API_KEY:
+            windows.append((config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS))
+        ctx = min(x[0] for x in windows)
+        output = min(x[1] for x in windows)
+    elif provider == "claude":
         ctx, output = config.CLAUDE_NUM_CTX, config.CLAUDE_MAX_TOKENS
     elif provider == "xkiro":
         ctx, output = config.XKIRO_NUM_CTX, config.XKIRO_MAX_TOKENS
