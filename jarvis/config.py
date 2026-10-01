@@ -170,6 +170,7 @@ def reload():
     g["HF_TOKEN"] = _env("HF_TOKEN") or _env("HUGGINGFACE_TOKEN")
     g["HF_BASE_URL"] = "https://router.huggingface.co/v1"
     g["HF_MODEL"] = _env("HF_MODEL") or "openai/gpt-oss-120b"
+    g["HF_VISION_MODEL"] = _env("HF_VISION_MODEL")
     g["HF_POLICY"] = _env("HF_POLICY", "cheapest")
     g["HF_TIMEOUT_SEC"] = max(10, _int("HF_TIMEOUT_SEC", 120))
     g["HF_NUM_CTX"] = max(4096, _int("HF_NUM_CTX", 128000))
