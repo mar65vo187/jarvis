@@ -6,6 +6,7 @@ eigenen Wissensspeicher (knowledge.py). Bei vorübergehendem Cloud-Ausfall arbei
 im selben Verlauf mit der lokalen KI weiter, ohne bereits ausgeführte Werkzeuge zu wiederholen.
 """
 import asyncio
+import time
 import json
 import re
 from typing import Any
@@ -13,7 +14,7 @@ from typing import Any
 import httpx
 
 from . import agents, claude, config, db, huggingface, knowledge, privacy, prompts, xkiro
-from .errors import PrivacyBlocked
+from .errors import BudgetExceeded, CloudUnavailable, PrivacyBlocked
 from .tools import all_schemas, run_tool
 
 
@@ -136,11 +137,22 @@ async def _call(messages: list[dict], tools: list[dict] | None = None, max_token
                              config.CLAUDE_MODEL if provider == "claude" else config.MODEL)
             LAST_PROVIDER.update(provider=provider, model=runtime_model, error="")
             LAST_ROUTE.update(provider=provider)
+            if provider != "ollama":
+                config.FALLBACK_STATUS.update(active=False, reason="")
             return result
         except Exception as exc:
             errors.append(f"{provider}: {str(exc)[:220]}")
             LAST_PROVIDER.update(provider=provider, model="", error=str(exc)[:300])
             if config.PROVIDER != "auto" or model is not None:
+                # Ausfall (nicht Einrichtungsfehler) → mit der eigenen lokalen KI weiterarbeiten.
+                if (isinstance(exc, (CloudUnavailable, BudgetExceeded)) and model is None and provider != "ollama"
+                        and config.FALLBACK_LOCAL and config.OLLAMA_STATUS.get("ok")):
+                    config.FALLBACK_STATUS.update(active=True, reason=str(exc)[:200], ts=time.time())
+                    local_msgs = _fit_context([dict(m) for m in messages], tools or [], local=True)
+                    result = await _ollama_call(local_msgs, tools, max_tokens, None)
+                    LAST_PROVIDER.update(provider="ollama", model=config.MODEL, error="")
+                    LAST_ROUTE.update(provider="ollama")
+                    return result
                 raise
     raise RuntimeError("Alle konfigurierten KI-Wege sind fehlgeschlagen: " + " | ".join(errors))
 
@@ -216,9 +228,6 @@ async def describe_image(b64: str, w: int = 0, h: int = 0, question: str = "") -
     if not config.VISION_MODEL:
         return ("[Bild vorhanden, aber kein Seh-Modell eingerichtet. Ohne JARVIS_VISION_MODEL kann ich den Inhalt "
                 "nicht sehen – nutze stattdessen windows/clipboard/PowerShell oder bitte den Owner.]")
-    if provider == "huggingface" and not config.HF_VISION_MODEL:
-        return ("[Bild vorhanden, aber für Hugging Face ist kein HF_VISION_MODEL eingerichtet. "
-                "Wähle ein VLM oder nutze xKiro/Claude bzw. ein lokales Seh-Modell.]")
     prompt = VISION_PROMPT.format(w=w or "?", h=h or "?") + (f"\nZusatzfrage: {question}" if question else "")
     vision_model = config.VISION_MODEL
     try:

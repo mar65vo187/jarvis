@@ -26,8 +26,10 @@ def run(coro):
 class Base(unittest.TestCase):
     def setUp(self):
         self._saved = {k: getattr(config, k) for k in ("PRIVACY", "XKIRO_API_KEY", "PROVIDER", "CLOUD_ENABLED",
-                                                        "FALLBACK_LOCAL", "LEARN_FROM_CLOUD", "VISION_MODEL")}
+                                                        "FALLBACK_LOCAL", "LEARN_FROM_CLOUD", "VISION_MODEL",
+                                                        "HF_TOKEN", "ANTHROPIC_API_KEY")}
         config.PROVIDER, config.CLOUD_ENABLED, config.XKIRO_API_KEY = "xkiro", True, "sk-xt-test"
+        config.HF_TOKEN, config.ANTHROPIC_API_KEY = "", ""
         config.FALLBACK_LOCAL, config.LEARN_FROM_CLOUD, config.VISION_MODEL = True, True, ""
         config.FALLBACK_STATUS.update(active=False, reason="", ts=0.0)
         config.OLLAMA_STATUS.update(ok=True, model_ok=True)
@@ -212,7 +214,42 @@ class Robustness(Base):
         with patch("jarvis.xkiro.call", down):
             reply = run(brain.chat("priv", "Erkläre kurz Photovoltaik."))
         self.assertEqual(reply, "Antwort der lokalen KI")
-        self.assertTrue(config.FALLBACK_STATUS["active"])
+        self.assertEqual(brain.LAST_PROVIDER["provider"], "ollama")
+
+    def test_no_silent_local_fallback_when_disabled(self):
+        config.PRIVACY, config.FALLBACK_LOCAL = "smart", False
+
+        async def down(*a, **k):
+            raise CloudUnavailable("xKiro überlastet")
+        with patch("jarvis.xkiro.call", down):
+            run(brain.chat("priv", "Erkläre kurz Photovoltaik."))
+        self.assertEqual(self.local, [])
+
+
+class HuggingFaceAndRemote(Base):
+    def test_hf_can_be_teacher(self):
+        config.PROVIDER, config.XKIRO_API_KEY, config.HF_TOKEN = "ollama", "", "hf_test"
+        self.assertEqual(tools.teacher_provider(), "huggingface")
+
+    def test_private_task_never_reaches_huggingface(self):
+        config.PRIVACY, config.PROVIDER, config.HF_TOKEN = "smart", "huggingface", "hf_test"
+        hf = []
+
+        async def fake_hf(messages, tools=None, max_tokens=None, model=None, **kw):
+            hf.append(json.dumps(messages, ensure_ascii=False))
+            return {"message": {"content": "hf", "tool_calls": []}}
+        with patch("jarvis.huggingface.call", fake_hf):
+            reply = run(brain.chat("priv", "/privat Was steht in meinem Tagebuch über Lisa?"))
+        self.assertEqual(hf, [])
+        self.assertEqual(reply, "Antwort der lokalen KI")
+
+    def test_github_remote_refuses_private_content(self):
+        from jarvis import github_remote
+        for task in ("/jarvis /privat meine Notizen", "/jarvis schreib an max@example.com",
+                     "/jarvis ruf +49 170 1234567 an"):
+            out = run(github_remote.run(task))
+            self.assertIn("Abgelehnt", out, task)
+        self.assertEqual(self.cloud, [])
 
 
 class ServerMode(unittest.TestCase):

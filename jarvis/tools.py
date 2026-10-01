@@ -406,6 +406,8 @@ def teacher_provider() -> str | None:
         return p
     if config.XKIRO_API_KEY:
         return "xkiro"
+    if config.HF_TOKEN:
+        return "huggingface"
     if config.ANTHROPIC_API_KEY:
         return "claude"
     return None
