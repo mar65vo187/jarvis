@@ -341,5 +341,23 @@ class Integration(unittest.TestCase):
             out = asyncio.run(brain._call([{'role':'user','content':'Hallo'}], max_tokens=50))
         self.assertEqual(out['message']['content'], 'HF bereit.')
 
+
+    def test_auto_runtime_failover_xkiro_to_huggingface(self):
+        os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
+                          XKIRO_API_KEY='x', HF_TOKEN='hf_x')
+        config.reload()
+
+        async def x_fail(*args, **kwargs):
+            raise RuntimeError('xKiro temporary outage')
+
+        async def hf_ok(*args, **kwargs):
+            return {'message': {'content': 'HF fallback bereit.', 'tool_calls': []}}
+
+        with patch.object(xkiro, 'call', new=x_fail), patch.object(huggingface, 'call', new=hf_ok):
+            out = asyncio.run(brain._call([{'role':'user','content':'Hallo'}], max_tokens=50))
+        self.assertEqual(out['message']['content'], 'HF fallback bereit.')
+        self.assertEqual(brain.LAST_PROVIDER['provider'], 'huggingface')
+        self.assertEqual(brain.LAST_PROVIDER['model'], config.HF_MODEL)
+
 if __name__ == '__main__':
     unittest.main()
