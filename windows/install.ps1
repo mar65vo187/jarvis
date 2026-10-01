@@ -298,11 +298,13 @@ $ok = $LASTEXITCODE
 Pop-Location
 if ($ok -ne 0) { throw "Selbsttest fehlgeschlagen - Log oben pruefen." }
 
-Say "Starte Jarvis ..."
+Say "Starte Jarvis + Watchdog ..."
+Start-Process -FilePath $Pyw -ArgumentList ('"' + (Join-Path $Target "Jarvis-Watchdog.pyw") + '"') -WorkingDirectory $Target
+Start-Sleep -Milliseconds 500
 Start-Process -FilePath $Pyw -ArgumentList ('"' + (Join-Path $Target "Jarvis-Oeffnen.pyw") + '"') -WorkingDirectory $Target
 
 Write-Host ""
-Write-Host "  FERTIG. Jarvis ($Provider) ist gestartet und startet ab jetzt mit Windows." -ForegroundColor Green
+Write-Host "  FERTIG. Jarvis ($Provider) ist gestartet; der Watchdog startet ihn bei einem Absturz neu." -ForegroundColor Green
 Write-Host "  Im Fenster: KI-Zugang speichern -> KI-VERBINDUNG TESTEN. Telegram ist optional."
 Write-Host "  Oeffnen: Desktop-Icon JARVIS oder Strg+Alt+J."
 Write-Host ""
