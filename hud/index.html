@@ -123,13 +123,14 @@ textarea.sin{font-family:inherit;resize:vertical}
   <label>Anrede<input class="sin" name="OWNER_TITLE" value="Sir"></label>
   <label>Über dich / dein Business (Jarvis arbeitet damit)<textarea class="sin" name="OWNER_INFO" rows="3"></textarea></label>
   <label>KI-Anbieter<select class="sin" name="JARVIS_PROVIDER">
-   <option value="auto">Automatisch: xKiro → Claude → Ollama</option>
-   <option value="xkiro">xKiro (viele Cloud-Modelle)</option>
+   <option value="auto">Automatisch: xKiro → Hugging Face → Claude → Ollama</option>
+   <option value="xkiro">xKiro (Multi-Modell-Gateway)</option>
+   <option value="huggingface">Hugging Face Inference Providers</option>
    <option value="claude">Claude (Anthropic API)</option>
    <option value="ollama">Ollama (lokal)</option>
   </select></label>
   <label>Cloud-KI<select class="sin" name="JARVIS_CLOUD_ENABLED">
-   <option value="1">AN – xKiro/Claude erlaubt</option>
+   <option value="1">AN – xKiro/Hugging Face/Claude erlaubt</option>
    <option value="0">AUS – nur lokale Ollama-KI</option>
   </select></label>
   <label>xKiro-API-Schlüssel<input type="password" class="sin mono" name="XKIRO_API_KEY" placeholder="sk-xt-…" autocomplete="new-password"></label>
@@ -140,6 +141,12 @@ textarea.sin{font-family:inherit;resize:vertical}
    <option value="">Modell-Standard</option><option value="none">none</option><option value="low">low</option>
    <option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option>
   </select></label>
+  <label>Hugging-Face-Token<input type="password" class="sin mono" name="HF_TOKEN" placeholder="hf_…" autocomplete="new-password"></label>
+  <label>Hugging-Face-Modell<input class="sin mono" name="HF_MODEL" list="hfModels" placeholder="openai/gpt-oss-120b"></label>
+  <datalist id="hfModels"></datalist>
+  <div class="row"><button type="button" class="btn sm" onclick="loadHFModels()">HF-MODELLE LADEN</button></div>
+  <label>HF Routing<select class="sin" name="HF_POLICY"><option value="cheapest">cheapest</option><option value="fastest">fastest</option><option value="preferred">preferred</option></select></label>
+  <label>HF Seh-Modell (optional)<input class="sin mono" name="HF_VISION_MODEL" placeholder="VLM-Modell-ID"></label>
   <details open><summary style="cursor:pointer;color:var(--cyan2)">Multi-Agenten-Rat</summary>
    <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
     <div class="empty">Spezialisten beraten parallel. Nur Master-Jarvis darf Werkzeuge/PC-Aktionen ausführen.</div>
@@ -151,6 +158,15 @@ textarea.sin{font-family:inherit;resize:vertical}
     <label>Parallel laufende Spezialisten<input type="number" min="1" max="6" class="sin" name="JARVIS_AGENT_MAX_PARALLEL" value="4"></label>
     <label>Kostenpräferenz<select class="sin" name="JARVIS_AGENT_PREFER_FREE"><option value="1">Kostenlose Modelle bevorzugen</option><option value="0">Qualität vor Preis</option></select></label>
     <label>Premium-Modelle<select class="sin" name="JARVIS_AGENT_ALLOW_PREMIUM"><option value="0">NICHT verwenden</option><option value="1">Erlauben</option></select></label>
+    <label>Agentenquelle xKiro<select class="sin" name="JARVIS_AGENT_USE_XKIRO"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Agentenquelle Hugging Face<select class="sin" name="JARVIS_AGENT_USE_HF"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Agentenquelle Ollama<select class="sin" name="JARVIS_AGENT_USE_OLLAMA"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <hr style="border-color:rgba(56,212,255,.18);width:100%">
+    <div class="empty">Upgrade-System erzeugt Child-Agenten, benchmarked sie und aktiviert nur bessere Varianten.</div>
+    <label>Auto-Upgrades<select class="sin" name="JARVIS_UPGRADE_AUTO"><option value="1">AN</option><option value="0">AUS</option></select></label>
+    <label>Auto-Upgrades nur kostenlos/lokal<select class="sin" name="JARVIS_UPGRADE_FREE_ONLY"><option value="1">JA</option><option value="0">NEIN</option></select></label>
+    <label>Upgrade-Intervall (Stunden)<input type="number" min="1" max="168" class="sin" name="JARVIS_UPGRADE_INTERVAL_HOURS" value="24"></label>
+    <label>Max. aktive Child-Agenten<input type="number" min="1" max="50" class="sin" name="JARVIS_UPGRADE_MAX_CHILDREN" value="12"></label>
    </div>
   </details>
   <label>Anthropic-API-Schlüssel für Claude<input type="password" class="sin mono" name="ANTHROPIC_API_KEY" placeholder="sk-ant-…" autocomplete="new-password"></label>
@@ -214,6 +230,9 @@ textarea.sin{font-family:inherit;resize:vertical}
       <div class="kpi"><span>Eigene Skills</span><b class="mono" id="skl">–</b></div>
       <div class="kpi"><span>Agentenrat</span><b class="mono" id="ags">–</b></div>
       <div class="s mono" id="agtMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
+      <div class="kpi"><span>Evolution</span><b class="mono" id="evo">–</b></div>
+      <div class="s mono" id="evoMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
+      <button class="btn sm" type="button" onclick="runUpgrade()">AGENT-UPGRADE STARTEN</button>
       <div class="kpi"><span>Gedächtnis</span><b class="mono" id="mem">–</b></div>
       <div class="kpi"><span>Spracheingabe</span><b class="mono" id="vox">–</b></div>
       <div class="kpi"><span>Telegram</span><b class="mono" id="tgs">–</b></div>
