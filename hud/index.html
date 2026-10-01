@@ -411,9 +411,14 @@ function openSetup(){const f=$('#setup form');
   f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
   f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.JARVIS_CLOUD_ENABLED.value=CFG.cloud_enabled===false?'0':'1';
   f.XKIRO_MODEL.value=CFG.xkiro_model||'openai/gpt-5.6-sol';f.XKIRO_REASONING_EFFORT.value=CFG.xkiro_reasoning||'';
+  f.HF_MODEL.value=CFG.hf_model||'openai/gpt-oss-120b';f.HF_VISION_MODEL.value=CFG.hf_vision_model||'';f.HF_POLICY.value=CFG.hf_policy||'cheapest';
+  f.HF_TOKEN.value='';f.HF_TOKEN.placeholder=CFG.hf_token_set?'(gesetzt – leer lassen = behalten)':'hf_…';
   f.JARVIS_AGENTS_ENABLED.value=CFG.agents_enabled===false?'0':'1';f.JARVIS_AGENT_MODE.value=CFG.agent_mode||'auto';
   f.JARVIS_AGENT_MAX_AGENTS.value=CFG.agent_max_agents||5;f.JARVIS_AGENT_MAX_PARALLEL.value=CFG.agent_max_parallel||4;
   f.JARVIS_AGENT_PREFER_FREE.value=CFG.agent_prefer_free===false?'0':'1';f.JARVIS_AGENT_ALLOW_PREMIUM.value=CFG.agent_allow_premium?'1':'0';
+  f.JARVIS_AGENT_USE_XKIRO.value=CFG.agent_use_xkiro===false?'0':'1';f.JARVIS_AGENT_USE_HF.value=CFG.agent_use_hf===false?'0':'1';f.JARVIS_AGENT_USE_OLLAMA.value=CFG.agent_use_ollama===false?'0':'1';
+  f.JARVIS_UPGRADE_AUTO.value=CFG.upgrade_auto===false?'0':'1';f.JARVIS_UPGRADE_FREE_ONLY.value=CFG.upgrade_free_only===false?'0':'1';
+  f.JARVIS_UPGRADE_INTERVAL_HOURS.value=CFG.upgrade_interval_hours||24;f.JARVIS_UPGRADE_MAX_CHILDREN.value=CFG.upgrade_max_children||12;
   f.XKIRO_API_KEY.value='';f.XKIRO_API_KEY.placeholder=CFG.xkiro_key_set?'(gesetzt – leer lassen = behalten)':'sk-xt-…';
   f.CLAUDE_MODEL.value=CFG.claude_model||'claude-sonnet-5-5';
   f.CLAUDE_DAILY_BUDGET_USD.value=CFG.claude_budget??1;
@@ -426,6 +431,13 @@ async function loadXkiroModels(){toast('xKiro-Modellkatalog wird geladen …');
   if(!r.ok)throw new Error(j.error||'Katalog nicht erreichbar');
   $('#xkiroModels').innerHTML=(j.models||[]).map(m=>'<option value="'+esc(m)+'"></option>').join('');
   toast((j.models||[]).length+' xKiro-Modelle geladen.')}catch(e){toast(e.message)}}
+async function loadHFModels(){toast('Hugging-Face-Modellkatalog wird geladen …');
+ try{const r=await fetch('/api/hf-models',{headers:{'Authorization':'Bearer '+TOKEN,'X-Jarvis':'1'}});const j=await r.json();
+  if(!r.ok)throw new Error(j.error||'HF-Katalog nicht erreichbar');
+  $('#hfModels').innerHTML=(j.models||[]).map(m=>'<option value="'+esc(m)+'"></option>').join('');
+  toast((j.models||[]).length+' HF-Modelle geladen.')}catch(e){toast(e.message)}}
+async function runUpgrade(){toast('Agent-Upgrade läuft …');
+ try{const j=await api('/api/upgrade',{method:'POST',body:JSON.stringify({focus:'auto'})});toast(j.result);poll()}catch(e){toast(e.message)}}
 async function checkAI(){toast('KI-Verbindung wird getestet …');
  try{const j=await api('/api/check',{method:'POST'});toast(j.provider+': '+j.reply);poll()}
  catch(e){toast(e.message)}}
@@ -441,7 +453,7 @@ async function doSetup(e){e.preventDefault();const body=Object.fromEntries(new F
   const saveButton=e.target.querySelector('button[type="submit"],button:not([type])');saveButton.disabled=true;
   try{
   const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1'},body:JSON.stringify(body)});
-  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
+  if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.HF_TOKEN.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
   else{let m='Speichern fehlgeschlagen';try{m=(await r.json()).error||m}catch(_){}toast(m)}
   }catch(err){toast('Speichern fehlgeschlagen: '+err.message)}finally{saveButton.disabled=false}}
 boot();
