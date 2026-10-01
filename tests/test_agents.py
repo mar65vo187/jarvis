@@ -4,30 +4,30 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import test_jarvis  # bootstrap isolated DATA_DIR / environment
-from jarvis import agents, brain, config, db, xkiro
+from jarvis import agents, brain, config, db, model_pool
 
 
 CATALOG = [
-    {"id": "openai/gpt-5.6-sol", "owned_by": "openai", "access_tier": "paid",
+    {"id": "openai/gpt-5.6-sol", "source": "xkiro", "owned_by": "openai", "access_tier": "paid",
      "context_length": 200000, "capabilities": {"reasoning": True, "tools": True, "vision": True},
      "reasoning_efforts": {"levels": ["low", "medium", "high"], "default": "medium"}},
-    {"id": "anthropic/claude-test", "owned_by": "anthropic", "access_tier": "paid",
+    {"id": "anthropic/claude-test", "source": "xkiro", "owned_by": "anthropic", "access_tier": "paid",
      "context_length": 200000, "capabilities": {"reasoning": True, "tools": True, "vision": True},
      "reasoning_efforts": {"levels": ["low", "high"], "default": "high"}},
-    {"id": "google/gemini-test", "owned_by": "google", "access_tier": "free",
+    {"id": "google/gemini-test", "source": "xkiro", "owned_by": "google", "access_tier": "free",
      "context_length": 1000000, "capabilities": {"reasoning": True, "tools": True, "vision": True},
      "reasoning_efforts": {"levels": ["low", "high"], "default": "high"}},
-    {"id": "qwen/qwen-test", "owned_by": "qwen", "access_tier": "free",
+    {"id": "qwen/qwen-test", "source": "xkiro", "owned_by": "qwen", "access_tier": "free",
      "context_length": 262144, "capabilities": {"reasoning": False, "tools": True, "vision": True}},
-    {"id": "deepseek/deepseek-test", "owned_by": "deepseek", "access_tier": "free",
+    {"id": "deepseek/deepseek-test", "source": "xkiro", "owned_by": "deepseek", "access_tier": "free",
      "context_length": 128000, "capabilities": {"reasoning": True, "tools": False, "vision": False},
      "reasoning_efforts": {"levels": ["high"], "default": "high"}},
-    {"id": "z-ai/glm-test", "owned_by": "z-ai", "access_tier": "free",
+    {"id": "z-ai/glm-test", "source": "xkiro", "owned_by": "z-ai", "access_tier": "free",
      "context_length": 200000, "capabilities": {"reasoning": True, "tools": True, "vision": False},
      "reasoning_efforts": {"levels": ["low", "high"], "default": "high"}},
-    {"id": "minimax/minimax-test", "owned_by": "minimax", "access_tier": "paid",
+    {"id": "minimax/minimax-test", "source": "xkiro", "owned_by": "minimax", "access_tier": "paid",
      "context_length": 200000, "capabilities": {"reasoning": True, "tools": True, "vision": False}},
-    {"id": "x-ai/grok-premium", "owned_by": "x-ai", "access_tier": "premium",
+    {"id": "x-ai/grok-premium", "source": "xkiro", "owned_by": "x-ai", "access_tier": "premium",
      "context_length": 200000, "capabilities": {"reasoning": True, "tools": True, "vision": False}},
 ]
 
@@ -62,11 +62,10 @@ class AgentCouncil(unittest.TestCase):
     def test_business_council_uses_distinct_specialists_and_web_research(self):
         calls = []
 
-        async def fake_call(messages, tools=None, max_tokens=None, model=None,
-                            reasoning_effort=None, web_search=False):
-            calls.append({"model": model, "tools": tools, "web_search": web_search,
+        async def fake_call(row, messages, max_tokens=None, reasoning_effort=None, web_search=False):
+            calls.append({"model": row["id"], "source": row["source"], "tools": None, "web_search": web_search,
                           "reasoning": reasoning_effort, "messages": messages})
-            return {"message": {"content": f"Beratung von {model}"}}
+            return {"message": {"content": f"Beratung von {row['id']}"}}
 
         settings = [
             patch.object(config, "AGENTS_ENABLED", True),
@@ -78,9 +77,11 @@ class AgentCouncil(unittest.TestCase):
             patch.object(config, "AGENT_PREFER_FREE", False),
             patch.object(config, "AGENT_ALLOW_PREMIUM", False),
             patch.object(config, "XKIRO_API_KEY", "x"),
-            patch.object(config, "active_provider", return_value="xkiro"),
-            patch.object(xkiro, "list_model_details", new=AsyncMock(return_value=CATALOG)),
-            patch.object(xkiro, "call", new=fake_call),
+            patch.object(config, "AGENT_USE_XKIRO", True),
+            patch.object(config, "AGENT_USE_HF", False),
+            patch.object(config, "AGENT_USE_OLLAMA", False),
+            patch.object(model_pool, "catalog", new=AsyncMock(return_value=CATALOG)),
+            patch.object(model_pool, "call", new=fake_call),
         ]
         for p in settings:
             p.start()
