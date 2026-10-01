@@ -34,9 +34,25 @@ def _ollama_tools() -> list[dict]:
     return out
 
 
-async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
-                model: str | None = None) -> dict:
-    provider = config.active_provider()
+LAST_PROVIDER = {"provider": "", "model": "", "error": ""}
+
+
+def _provider_chain() -> list[str]:
+    """Configured failover chain. Only used when JARVIS_PROVIDER=auto."""
+    if not config.CLOUD_ENABLED:
+        return ["ollama"]
+    chain = []
+    if config.XKIRO_API_KEY:
+        chain.append("xkiro")
+    if config.HF_TOKEN:
+        chain.append("huggingface")
+    if config.ANTHROPIC_API_KEY:
+        chain.append("claude")
+    chain.append("ollama")
+    return chain
+
+
+async def _call_provider(provider: str, messages, tools=None, max_tokens=None, model=None):
     if provider == "claude":
         return await claude.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     if provider == "xkiro":
@@ -44,6 +60,32 @@ async def _call(messages: list[dict], tools: list[dict] | None = None, max_token
     if provider == "huggingface":
         return await huggingface.call(messages, tools=tools, max_tokens=max_tokens, model=model)
     return await _ollama_call(messages, tools, max_tokens, model)
+
+
+async def _call(messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None,
+                model: str | None = None) -> dict:
+    # An explicit model belongs to the selected provider (e.g. vision); never send
+    # that provider-specific ID to a different API. Normal master calls in AUTO
+    # mode are safe to fail over because a failed model request has not executed
+    # Jarvis side effects. Tool results already in the history are merely continued.
+    providers = [config.active_provider()]
+    if config.PROVIDER == "auto" and model is None:
+        providers = _provider_chain()
+    errors = []
+    for provider in providers:
+        try:
+            result = await _call_provider(provider, messages, tools, max_tokens, model)
+            runtime_model = (config.XKIRO_MODEL if provider == "xkiro" else
+                             config.HF_MODEL if provider == "huggingface" else
+                             config.CLAUDE_MODEL if provider == "claude" else config.MODEL)
+            LAST_PROVIDER.update(provider=provider, model=runtime_model, error="")
+            return result
+        except Exception as exc:
+            errors.append(f"{provider}: {str(exc)[:220]}")
+            LAST_PROVIDER.update(provider=provider, model="", error=str(exc)[:300])
+            if config.PROVIDER != "auto" or model is not None:
+                raise
+    raise RuntimeError("Alle konfigurierten KI-Wege sind fehlgeschlagen: " + " | ".join(errors))
 
 
 _ollama_lock = asyncio.Lock()
