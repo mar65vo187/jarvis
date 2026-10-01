@@ -12,7 +12,9 @@ APP_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = Path(os.environ.get("JARVIS_ENV_FILE", str(APP_DIR / ".env")))
 IS_WINDOWS = sys.platform.startswith("win")
 # LOCAL = läuft auf dem eigenen PC (nicht im Docker-Server)
-LOCAL = os.environ.get("JARVIS_LOCAL", "1") == "1"
+# SERVER = läuft online (z.B. Oracle Cloud) hinter HTTPS-Proxy/Tailscale, Zugang nur mit Passwort.
+SERVER = os.environ.get("JARVIS_SERVER", "0") == "1"
+LOCAL = (not SERVER) and os.environ.get("JARVIS_LOCAL", "1") == "1"
 
 
 def load_env_file():
@@ -78,6 +80,11 @@ def validate_values(values: dict):
                 "JARVIS_UPGRADE_AUTO", "JARVIS_UPGRADE_FREE_ONLY"):
         if key in values and values[key] not in ("0", "1"):
             raise ValueError(f"{key} muss 0 oder 1 sein.")
+    if "JARVIS_PRIVACY" in values and values["JARVIS_PRIVACY"] not in ("smart", "strikt"):
+        raise ValueError("JARVIS_PRIVACY muss smart oder strikt sein.")
+    for key in ("JARVIS_LEARN", "JARVIS_FALLBACK_LOCAL"):
+        if key in values and values[key] not in ("0", "1"):
+            raise ValueError(f"{key} muss 0 oder 1 sein.")
     if "JARVIS_AGENT_MODE" in values and values["JARVIS_AGENT_MODE"] not in ("off", "auto", "always"):
         raise ValueError("JARVIS_AGENT_MODE muss off, auto oder always sein.")
     for key, lo, hi in (("JARVIS_AGENT_MAX_AGENTS", 1, 8), ("JARVIS_AGENT_MAX_PARALLEL", 1, 6),
@@ -109,6 +116,11 @@ def validate_values(values: dict):
                     raise ValueError()
             except ValueError:
                 raise ValueError(f"{key} muss eine nichtnegative Zahl sein.") from None
+
+
+def provider_label(provider: str | None = None) -> str:
+    p = provider or active_provider()
+    return {"xkiro": "xKiro", "claude": "Claude", "ollama": "Lokale KI"}.get(p, p)
 
 
 def active_provider() -> str:
@@ -199,6 +211,15 @@ def reload():
     g["CLAUDE_TIMEOUT_SEC"] = max(10, _int("CLAUDE_TIMEOUT_SEC", 180))
     g["CLAUDE_NUM_CTX"] = max(4096, _int("CLAUDE_NUM_CTX", 100000))
     g["CLAUDE_MAX_TOKENS"] = max(256, _int("CLAUDE_MAX_TOKENS", 4096))
+    # Bei vorübergehendem Cloud-Ausfall/Budgetende mit lokaler KI weiterarbeiten (nur wenn Ollama bereit ist).
+    g["FALLBACK_LOCAL"] = _env("JARVIS_FALLBACK_LOCAL", "1") == "1"
+    # --- Privatsphäre („Einbahnstraße“): Wissen darf herein, private Daten nie hinaus ---
+    # smart  = private Aufgaben automatisch nur lokal, Rest darf in die Cloud
+    # strikt = ALLES nur lokal; Cloud-KIs nur noch als „Lehrer“ für allgemeine Fragen ohne Kontext
+    pm = (_env("JARVIS_PRIVACY", "strikt") or "strikt").lower()
+    g["PRIVACY"] = pm if pm in ("smart", "strikt") else "strikt"
+    # Neues Wissen aus Cloud-Antworten automatisch in Jarvis' eigenen Wissensspeicher übernehmen
+    g["LEARN_FROM_CLOUD"] = _env("JARVIS_LEARN", "1") == "1"
     validate_values({"JARVIS_PROVIDER": g["PROVIDER"],
                      "JARVIS_CLOUD_ENABLED": "1" if g["CLOUD_ENABLED"] else "0",
                      "XKIRO_REASONING_EFFORT": g["XKIRO_REASONING_EFFORT"],
@@ -269,7 +290,7 @@ def reload():
     g["JARVIS_PASSWORD"] = _env("JARVIS_PASSWORD")
     g["PORT"] = _int("PORT", 8765)
     g["HOST"] = "127.0.0.1"  # unverhandelbar: nie öffentlich binden
-    g["PUBLIC_BASE_URL"] = f"http://127.0.0.1:{g['PORT']}"
+    g["PUBLIC_BASE_URL"] = (_env("PUBLIC_BASE_URL").rstrip("/") if SERVER else "") or f"http://127.0.0.1:{g['PORT']}"
     # --- Lokale Sprache ---
     g["WHISPER_MODEL"] = _env("WHISPER_MODEL", "small")
     g["WHISPER_DEVICE"] = _env("WHISPER_DEVICE", "auto")
@@ -310,6 +331,8 @@ OLLAMA_STATUS: dict = {"ok": False, "model_ok": False, "vision_ok": False, "msg"
 CLAUDE_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0}
 XKIRO_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0, "usage": ""}
 HF_STATUS: dict = {"ok": False, "model_ok": False, "msg": "prüfe …", "checked": 0.0}
+# Grund, falls Jarvis gerade auf die lokale KI ausweicht (HUD/Telegram)
+FALLBACK_STATUS: dict = {"active": False, "reason": "", "ts": 0.0}
 reload()
 
 HOME = Path.home()

@@ -18,6 +18,21 @@ prüft den lokalen `/health`-Endpunkt und startet Jarvis nach einem Absturz neu.
 Das funktioniert, solange der Windows-PC eingeschaltet und der Benutzer angemeldet
 ist.
 
+## 1b. Privatsphäre: deine eigene KI
+
+Standard ist **STRIKT**: Jarvis arbeitet mit deiner eigenen lokalen KI. xKiro/Claude sind nur noch
+**Lehrer**: Jarvis stellt ihnen einzelne, allgemeine Fragen (ohne Namen, Kontaktdaten, Verlauf) und
+speichert die Antworten als **eigenes Wissen** – so wird deine KI mit der Zeit stärker.
+Rechts im Fenster: „Privatsphäre“ und „Eigenes Wissen“. In Telegram: `/wissen`.
+
+- Brauchst du mehr Tempo für allgemeine Aufgaben: EINSTELLUNGEN → Privatsphäre **SMART**.
+  Private Daten bleiben trotzdem lokal (Dateien, Mails, Bildschirm, Fotos, Gedächtnis, `/privat …`).
+- Ohne lokale KI (Ollama) kann Jarvis im Modus STRIKT nicht antworten – bei wenig RAM SMART wählen.
+- Privates Gedächtnis und private Gespräche werden verschlüsselt gespeichert. Den Schlüssel
+  `data/jarvis.key` zusätzlich sicher aufbewahren (z. B. Passwort-Manager).
+
+## 2. xKiro Multi-Modell verbinden
+
 ## 2. xKiro verbinden
 
 1. xKiro-API-Schlüssel erzeugen.

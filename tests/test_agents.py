@@ -36,8 +36,12 @@ class AgentCouncil(unittest.TestCase):
     def setUp(self):
         self.last = dict(agents.LAST_RUN)
         db.clear_history("agent-test")
+        # Der Spezialistenrat arbeitet nur im Privatsphäre-Modus „smart“ (Standard „strikt“ = alles lokal)
+        self._privacy = config.PRIVACY
+        config.PRIVACY = "smart"
 
     def tearDown(self):
+        config.PRIVACY = self._privacy
         agents.LAST_RUN.clear()
         agents.LAST_RUN.update(self.last)
         db.clear_history("agent-test")

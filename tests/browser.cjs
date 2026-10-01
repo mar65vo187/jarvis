@@ -22,7 +22,7 @@ fs.mkdirSync(output,{recursive:true});
   });
  });
  await new Promise(r=>mock.listen(18767,'127.0.0.1',r));
- const server=spawn(process.env.JARVIS_PYTHON||'python',['-m','jarvis'],{cwd:root,env:{...process.env,DATA_DIR:data,JARVIS_ENV_FILE:path.join(data,'.env'),JARVIS_PROVIDER:'claude',OLLAMA_BASE_URL:'http://127.0.0.1:18767',PORT:'18766',PYTHONUNBUFFERED:'1'}});
+ const server=spawn(process.env.JARVIS_PYTHON||'python',['-m','jarvis'],{cwd:root,env:{...process.env,DATA_DIR:data,JARVIS_ENV_FILE:path.join(data,'.env'),JARVIS_PROVIDER:'claude',JARVIS_PRIVACY:'smart',OLLAMA_BASE_URL:'http://127.0.0.1:18767',PORT:'18766',PYTHONUNBUFFERED:'1'}});
  let logs='';server.stdout.on('data',d=>logs+=d);server.stderr.on('data',d=>logs+=d);
  let browser;
  try {

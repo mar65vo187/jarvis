@@ -122,6 +122,14 @@ textarea.sin{font-family:inherit;resize:vertical}
   <label>Dein Name<input class="sin" name="OWNER_NAME" value="Marvin"></label>
   <label>Anrede<input class="sin" name="OWNER_TITLE" value="Sir"></label>
   <label>Über dich / dein Business (Jarvis arbeitet damit)<textarea class="sin" name="OWNER_INFO" rows="3"></textarea></label>
+  <label>Privatsphäre (Einbahnstraße: Wissen herein, Privates nie hinaus)<select class="sin" name="JARVIS_PRIVACY">
+   <option value="strikt">STRIKT – alles mit deiner eigenen KI; Cloud-KIs nur als Lehrer für allgemeine Fragen</option>
+   <option value="smart">SMART – Privates nur lokal, allgemeine Aufgaben dürfen in die Cloud</option>
+  </select></label>
+  <label>Von Lehrer-KIs lernen<select class="sin" name="JARVIS_LEARN">
+   <option value="1">JA – gute Antworten werden dauerhaft eigenes Wissen</option>
+   <option value="0">NEIN</option>
+  </select></label>
   <label>KI-Anbieter<select class="sin" name="JARVIS_PROVIDER">
    <option value="auto">Automatisch: xKiro → Hugging Face → Claude → Ollama</option>
    <option value="xkiro">xKiro (Multi-Modell-Gateway)</option>
@@ -227,6 +235,8 @@ textarea.sin{font-family:inherit;resize:vertical}
       <div class="s mono" id="costMsg" style="font-size:12px"></div>
       <div class="kpi"><span>Zugriff</span><b class="mono" id="acc">–</b></div>
       <div class="kpi"><span>PC-Kontrolle</span><b class="mono" id="pcs">–</b></div>
+      <div class="kpi"><span>Privatsphäre</span><b class="mono" id="prv">–</b></div>
+      <div class="kpi"><span>Eigenes Wissen</span><b class="mono" id="kno">–</b></div>
       <div class="kpi"><span>Eigene Skills</span><b class="mono" id="skl">–</b></div>
       <div class="kpi"><span>Agentenrat</span><b class="mono" id="ags">–</b></div>
       <div class="s mono" id="agtMsg" style="font-size:11px;overflow-wrap:anywhere"></div>
@@ -268,7 +278,7 @@ async function api(path,opts={}){
 async function doLogin(e){e.preventDefault();
  try{
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('#pw').value})});
-  if(!r.ok){$('#loginErr').textContent='Zugang verweigert.';return}
+  if(!r.ok){let m='Falsches Passwort.';if(r.status===429){try{m=(await r.json()).error||m}catch(_){}}$('#loginErr').textContent=m;return}
   const j=await r.json();TOKEN=j.token;try{localStorage.setItem('jarvis_token',TOKEN)}catch(e){}CFG=await api('/api/config');started=true;start(j.title)
  }catch(err){$('#loginErr').textContent='Verbindung fehlgeschlagen: '+err.message}}
 function logout(){TOKEN=null;try{localStorage.removeItem('jarvis_token')}catch(e){}$('#login').style.display='flex'}
@@ -362,6 +372,8 @@ async function poll(){
   $('#costMsg').textContent=s.provider==='claude'?('Heute ca. $'+Number(s.usage.cost_usd).toFixed(3)+' · Tageslimit '+(s.usage.budget_usd?'$'+s.usage.budget_usd:'ohne Limit')):s.provider==='xkiro'?(s.usage.provider_usage||'xKiro-Konto verbunden'):s.provider==='huggingface'?'HF Inference Providers':'Lokale KI: keine API-Gebühren';
   $('#acc').textContent=s.full_access?'GANZER PC':'NUR WORKSPACE';
   $('#skl').textContent=s.skills;
+  $('#prv').textContent=(s.privacy||'strikt').toUpperCase();$('#prv').style.color='var(--ok)';
+  $('#kno').textContent=s.knowledge?s.knowledge.entries:0;
   const ag=s.agents||{},last=ag.last||{},okAgents=(last.agents||[]).filter(x=>x.ok);
   $('#ags').textContent=!ag.enabled?'AUS':String(ag.mode||'auto').toUpperCase();
   $('#agtMsg').textContent=last.used?(okAgents.length+' Spezialisten · '+okAgents.map(x=>(x.source?x.source+':':'')+x.model).join(' · ')):(ag.enabled?'bereit · '+(ag.roles||[]).length+' Rollen · '+(ag.custom_agents||0)+' Child':'');
@@ -409,6 +421,7 @@ async function toggleStop(){const on=!notausOn;if(!on&&!confirm('NOTAUS aufheben
 function openSetup(){const f=$('#setup form');
   f.OWNER_NAME.value=CFG.name||'Marvin';f.OWNER_TITLE.value=CFG.title||'Sir';f.OWNER_INFO.value=CFG.info||'';
   f.JARVIS_MODEL.value=CFG.model||'';f.JARVIS_VISION_MODEL.value=CFG.vision||'';
+  f.JARVIS_PRIVACY.value=CFG.privacy||'strikt';f.JARVIS_LEARN.value=CFG.learn===false?'0':'1';
   f.JARVIS_PROVIDER.value=CFG.provider||'auto';f.JARVIS_CLOUD_ENABLED.value=CFG.cloud_enabled===false?'0':'1';
   f.XKIRO_MODEL.value=CFG.xkiro_model||'openai/gpt-5.6-sol';f.XKIRO_REASONING_EFFORT.value=CFG.xkiro_reasoning||'';
   f.HF_MODEL.value=CFG.hf_model||'openai/gpt-oss-120b';f.HF_VISION_MODEL.value=CFG.hf_vision_model||'';f.HF_POLICY.value=CFG.hf_policy||'cheapest';
@@ -452,7 +465,7 @@ async function boot(){
 async function doSetup(e){e.preventDefault();const body=Object.fromEntries(new FormData(e.target));
   const saveButton=e.target.querySelector('button[type="submit"],button:not([type])');saveButton.disabled=true;
   try{
-  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1'},body:JSON.stringify(body)});
+  const r=await fetch('/api/setup',{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis':'1','Authorization':'Bearer '+TOKEN},body:JSON.stringify(body)});
   if(r.ok){const j=await r.json();$('#setup').style.display='none';e.target.TELEGRAM_BOT_TOKEN.value='';e.target.N8N_SECRET.value='';e.target.XKIRO_API_KEY.value='';e.target.HF_TOKEN.value='';e.target.ANTHROPIC_API_KEY.value='';toast(j.llm?.ok?'Gespeichert. KI-Zugang geprüft.':'Gespeichert. '+(j.llm?.msg||'KI-Zugang noch prüfen.'));CFG=await (await fetch('/api/config')).json();await boot();poll()}
   else{let m='Speichern fehlgeschlagen';try{m=(await r.json()).error||m}catch(_){}toast(m)}
   }catch(err){toast('Speichern fehlgeschlagen: '+err.message)}finally{saveButton.disabled=false}}

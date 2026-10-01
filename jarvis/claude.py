@@ -10,18 +10,15 @@ import time
 import httpx
 
 from . import config, db
+from .errors import BudgetExceeded, CloudConfigError, CloudUnavailable  # noqa: F401
 
 API_URL = "https://api.anthropic.com/v1"
 _lock = asyncio.Lock()
 
 
-class BudgetExceeded(RuntimeError):
-    pass
-
-
 def _headers():
     if not config.ANTHROPIC_API_KEY:
-        raise RuntimeError("Claude braucht einen Anthropic-API-Schlüssel. In EINSTELLUNGEN eintragen.")
+        raise CloudConfigError("Claude braucht einen Anthropic-API-Schlüssel. In EINSTELLUNGEN eintragen.")
     return {"x-api-key": config.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"}
 
 
@@ -134,12 +131,16 @@ async def call(messages, tools=None, max_tokens=None, model=None):
                     if attempt < 2:
                         await asyncio.sleep(attempt + 1)
                         continue
-                    raise RuntimeError("Claude ist nicht erreichbar. Internetverbindung prüfen.") from None
+                    raise CloudUnavailable("Claude ist nicht erreichbar. Internetverbindung prüfen.") from None
                 except httpx.HTTPError:
-                    raise RuntimeError("Claude-Anfrage unterbrochen oder Zeitlimit erreicht. Bitte erneut versuchen.") from None
+                    raise CloudUnavailable("Claude-Anfrage unterbrochen oder Zeitlimit erreicht. Bitte erneut versuchen.") from None
                 if response.status_code in (429, 500, 502, 503, 504, 529) and attempt < 2:
                     await asyncio.sleep(attempt + 1)
                     continue
+                if response.status_code in (401, 403, 404):
+                    raise CloudConfigError(_error(response))
+                if response.status_code in (429, 529) or response.status_code >= 500:
+                    raise CloudUnavailable(_error(response))
                 if response.status_code >= 400:
                     raise RuntimeError(_error(response))
                 try:

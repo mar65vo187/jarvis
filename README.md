@@ -120,6 +120,68 @@ Dashboard: http://127.0.0.1:8765. Der App-Server bindet absichtlich nur an
 Loopback. Für Windows-PC-Steuerung zusätzlich `requirements-windows.txt`
 installieren.
 
+## Deine eigene KI: Einbahnstraße für Daten
+
+**Wissen darf herein – private Daten nie hinaus.** Im Code erzwungen (`jarvis/privacy.py`), mit Tests belegt
+(`tests/test_privacy.py`):
+
+| Was | Wie |
+|---|---|
+| Private Daten (Dateien, Mails, Bildschirm, Fotos, Kontakte, Gedächtnis, Chats) | verarbeitet **nur die lokale KI** (Ollama). Ist sie nicht bereit, bricht Jarvis ab – nichts geht an eine Cloud |
+| Modus `strikt` (Standard) | **alles** läuft lokal; Cloud-KIs (xKiro/Claude) nur als **Lehrer**: einzelne allgemeine Frage, ohne Verlauf, ohne Namen/Kontaktdaten (wird geprüft) |
+| Modus `smart` | Privates lokal, allgemeine Aufgaben dürfen in die Cloud (schneller/klüger), Agentenrat nur für Nicht-Privates |
+| Ausgangsschleuse | in privaten Aufgaben: Suche mit persönlichen Daten blockiert; Mail/HTTP/n8n/Veröffentlichen nur nach Freigabe mit genauer Vorschau |
+| Speicherung | private Nachrichten und privates Gedächtnis **verschlüsselt** (Schlüssel getrennt in `data/jarvis.key`) |
+| Bilder | nur lokales Seh-Modell (`JARVIS_VISION_MODEL`), nie Cloud |
+
+**Selbstverbesserung – Jarvis wird stärker:**
+1. **Eigenes Wissen** (`jarvis/knowledge.py`): Jede Lehrer-Antwort und jede gute Cloud-Antwort auf eine
+   allgemeine Frage wird dauerhaft gespeichert und bei passenden Aufgaben mitgegeben – auch der lokalen KI.
+   So lernt **deine** KI von den großen Modellen, ohne dass Privates hinausgeht. Telegram: `/wissen`.
+2. **Eigene Skills**: Jarvis baut sich neue Werkzeuge (nach deiner Freigabe, versioniert, zurücksetzbar).
+3. **Besseres lokales Modell**: neue Modelle direkt von Hugging Face (`ollama pull hf.co/<name>/<modell>:Q4_K_M`).
+4. **Code**: Weiterentwicklung über GitHub (Tests + automatisches Aufspielen, Rückfall bei Fehlstart).
+
+Hinweis: Telegram kann Bot-Chats lesen. Sehr Privates im Jarvis-Fenster (über Tailscale) schreiben
+oder mit `/privat …` beginnen – dann bleibt die Verarbeitung lokal, Telegram transportiert aber den Text.
+
+## Multi-Agenten-Architektur
+
+Bei `JARVIS_AGENT_MODE=auto` startet Jarvis den Rat nur bei Aufgaben, die von
+mehreren Perspektiven profitieren. Die Modell-IDs werden **nicht hart verdrahtet**:
+Jarvis liest `GET /v1/models` und berücksichtigt Anbieter, Fähigkeiten,
+Zugangsstufe, Kontextgröße und Kostenpräferenz. Dadurch können neue xKiro-Modelle
+automatisch Kandidaten werden, ohne den Jarvis-Code zu ändern.
+
+Der Rat umfasst bis zu acht definierte Rollen: **Strategist, Researcher, Engineer,
+Analyst, Critic, Security, Creative und Auditor**. Pro Aufgabe wird nur eine passende
+Teilmenge gestartet. Der Researcher kann xKiros Live-Websuche verwenden. Ergebnisse
+werden als Beratung in den Systemkontext des Masters gegeben; Seiteneffekte bleiben
+zentral beim Master und seinen Freigaberegeln.
+
+Wichtige Schalter stehen in `.env.example` und im Dashboard. Standard: maximal
+5 Spezialisten, 4 parallel, kostenlose Modelle bevorzugt, Premium aus. Autonome
+Missionen holen den Rat im ersten Zyklus und anschließend standardmäßig alle vier
+Zyklen erneut hinzu, damit Daueraufgaben nicht bei jedem Lauf unnötig viele Modelle
+aufrufen.
+
+## Anbieter
+
+| Einstellung | Verhalten |
+|---|---|
+| `JARVIS_PROVIDER=xkiro` | xKiro; Modell-ID im Format `anbieter/modell` |
+| `JARVIS_PROVIDER=claude` | Claude direkt; Anthropic-API-Schlüssel erforderlich |
+| `JARVIS_PROVIDER=ollama` | Lokales Ollama-Modell erforderlich |
+| `JARVIS_PROVIDER=auto` | xKiro mit Schlüssel, sonst Claude, sonst Ollama |
+| `JARVIS_CLOUD_ENABLED=0` | Harte Cloud-Sperre; erzwingt Ollama |
+
+Keine automatische Wiederholung bereits ausgeführter Aufgaben mit einem anderen
+Anbieter. Modell und Anbieter lassen sich im Dashboard ändern. Für xKiro wird der
+Modellkatalog live über `/v1/models` geladen; API-Schlüssel werden ausschließlich
+lokal in der Jarvis-`.env` gespeichert. Die standardmäßige
+Claude-Kostenschätzung nutzt ein Tageslimit von 1 USD; Details in `.env.example`.
+Sie ersetzt kein Abrechnungslimit beim Anbieter. Bei Modellwechsel Preise anpassen.
+
 ## Prüfen
 
 ```bash
@@ -132,3 +194,29 @@ Installer, Multi-Provider-Routing, Agentenrat, Upgrade-System sowie einen echten
 Playwright-Browserfluss. Erst danach wird `JARVIS_READY.zip` erzeugt.
 
 Ausführliche Einrichtung: [ANLEITUNG.md](ANLEITUNG.md).
+
+## Online rund um die Uhr (Oracle Cloud, Always Free) – nur für dich erreichbar
+
+Oracle stellt dauerhaft kostenlos einen ARM-Server bereit (laut Oracle-Doku 2026: 2 OCPU + 12 GB RAM).
+Darauf laufen Jarvis, die lokale KI (Ollama) und tägliche verschlüsselte Backups.
+
+1. **Tailscale** (kostenlos): Konto anlegen, App auf Handy und PC installieren,
+   Admin → *Settings → Keys* → **Auth key** erzeugen, Admin → *DNS* → **HTTPS Certificates** einschalten.
+2. **Eigenen Telegram-Bot** für die Online-Version anlegen (nicht denselben wie am PC).
+3. Inhalt von [`deploy/oracle/cloud-init.yaml`](deploy/oracle/cloud-init.yaml) kopieren und ausfüllen:
+   Bot-Token, Passwort, `TS_AUTHKEY`, optional `XKIRO_API_KEY` (Lehrer). **Ausgefüllt nie ins Repo.**
+4. Oracle → Compute → Instanz erstellen: Ubuntu 24.04, Shape `VM.Standard.A1.Flex` (2 OCPU, 12 GB),
+   SSH-Schlüssel speichern, *Erweiterte Optionen → Management → cloud-init* einfügen.
+5. Nach 15–25 Min. auf dem Handy (Tailscale an): `https://jarvis.<dein-tailnet>.ts.net` öffnen,
+   mit Passwort anmelden, angezeigten Code als `/koppeln 123456` an den Online-Bot schicken.
+
+Mit Tailscale ist **kein Port** im Internet offen (keine Oracle-Firewall-Regeln nötig). Ohne `TS_AUTHKEY`
+richtet das Skript stattdessen öffentliches HTTPS mit Login-Sperre ein (dann TCP 80/443 in der Oracle
+Security List freigeben).
+
+Wartung per SSH: `sudo cat /root/jarvis-zugang.txt` (Adresse, Passwort, **Schlüssel sichern!**),
+`sudo journalctl -u jarvis -f`, Update `sudo /opt/jarvis/deploy/oracle/update.sh` (Rückfall bei Fehlstart),
+Backup `sudo /opt/jarvis/deploy/oracle/backup.sh` (läuft täglich automatisch, Schlüssel nicht im Backup).
+
+**Automatisch deployen:** Repo → Settings → Secrets → Actions: `ORACLE_HOST`, `ORACLE_SSH_KEY`
+(bei Tailscale: Tailscale-IP und einen GitHub-Runner im Tailnet, oder Update von Hand).
