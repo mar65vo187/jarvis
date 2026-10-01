@@ -1,0 +1,39 @@
+name: Deploy auf Oracle
+# Nach jedem erfolgreichen Test auf main: Server holt sich die neue Version und startet Jarvis neu.
+# Einmalig einrichten: Repo → Settings → Secrets and variables → Actions → New repository secret
+#   ORACLE_HOST     = öffentliche IP des Servers
+#   ORACLE_SSH_KEY  = Inhalt deines privaten SSH-Schlüssels (die .key-Datei von Oracle)
+#   ORACLE_USER     = ubuntu   (optional, Standard: ubuntu)
+on:
+  workflow_run:
+    workflows: ["Jarvis checks and download"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+concurrency: deploy
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prüfen, ob der Server eingetragen ist
+        id: check
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          if [ -z "$HOST" ]; then
+            echo "::notice::ORACLE_HOST ist nicht gesetzt – Deploy übersprungen (siehe README)."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update auf dem Server
+        if: steps.check.outputs.skip != '1'
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USER_NAME: ${{ secrets.ORACLE_USER }}
+          KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_oracle
+          chmod 600 ~/.ssh/id_oracle
+          ssh -i ~/.ssh/id_oracle -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
+            "${USER_NAME:-ubuntu}@$HOST" 'sudo /opt/jarvis/deploy/oracle/update.sh'
