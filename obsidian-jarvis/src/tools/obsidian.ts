@@ -129,7 +129,7 @@ export function buildObsidianTools(
     summary: 'Zeigt die Tagesnotiz von heute (und ob es sie schon gibt).',
     params: [{ name: 'maxChars', description: 'Höchstzahl Zeichen (Standard 6000)', required: false }],
     handler: async (args) => {
-      const pfad = kontrolle.tagesnotizPfad();
+      const pfad = safeVaultPath(kontrolle.tagesnotizPfad());
       if (!pfad) return { ok: false, text: 'Der Pfad der Tagesnotiz ist nicht bekannt (Einstellungen → Werkzeuge).' };
       const inhalt = await kontrolle.lesePfad(pfad);
       if (inhalt === null) {
@@ -147,7 +147,7 @@ export function buildObsidianTools(
       danger: 'write',
       params: [{ name: 'content', description: 'Der Text, z. B. "- 14:00 Besprechung mit Team"', required: true }],
       handler: async (args) => {
-        const pfad = kontrolle.tagesnotizPfad();
+        const pfad = safeVaultPath(kontrolle.tagesnotizPfad());
         if (!pfad) return { ok: false, text: 'Der Pfad der Tagesnotiz ist nicht bekannt (Einstellungen → Werkzeuge).' };
         const text = typeof args.content === 'string' ? args.content : argText(args, 'content');
         if (!text.trim()) return { ok: false, text: 'Es fehlt "content" (der Text für die Tagesnotiz).' };

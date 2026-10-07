@@ -1174,6 +1174,12 @@ describe('Werkzeuge für die Obsidian-Oberfläche', () => {
     const ergaenzt = await rufe(specs, 'daily_append', { content: '- 14:00 Review' });
     expect(ergaenzt.ok).toBe(true);
     expect(ergaenzt.text).toContain('angehängt');
+
+    // Ein unsinniger Ordner (.obsidian) wird bereinigt statt befolgt.
+    const boese = baue(mitFreigabe, fakeKontrolle({ tagesnotizPfad: () => '.obsidian/2026-10-07.md' }));
+    const abgewiesen = await rufe(boese, 'daily_append', { content: 'x' });
+    expect(abgewiesen.ok).toBe(false);
+    expect(abgewiesen.text).toContain('nicht bekannt');
   });
 
   it('öffnet Notizen und schreibt nur in die Auswahl, wenn es erlaubt ist', async () => {

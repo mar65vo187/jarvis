@@ -1,4 +1,4 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.1.1
+# Prüfbericht — Jarvis AI für Obsidian 2.1.2
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
@@ -189,7 +189,8 @@ Begrenzung auf 40 Beiträge).
 - **Obsidian-Oberfläche**: geöffnete Notiz samt markiertem Text (und die klare Meldung, wenn
   keine offen ist), Verweise und Backlinks, Tags nach Häufigkeit gefiltert, Öffnen von
   Notizen, Tagesnotiz lesen und ergänzen, Auswahl im Editor ersetzen — Schreibendes nur mit
-  Freigabe; Pfade werden bereinigt (kein Weg aus dem Vault, `.obsidian` bleibt gesperrt).
+  Freigabe; Pfade werden bereinigt (kein Weg aus dem Vault, `.obsidian` bleibt gesperrt —
+  auch beim Tagesnotizen-Ordner).
 - **Agentenschleife**: Werkzeugaufruf → Ergebnis → Endantwort; Werkzeugergebnisse sind in
   Folge-Runden sichtbar; erfundene Werkzeugnamen lösen eine Korrekturrunde aus;
   `maxSteps` stoppt mit Hinweis; Token werden über alle Runden addiert; Streaming wird

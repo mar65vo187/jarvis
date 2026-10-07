@@ -1,7 +1,7 @@
 {
   "id": "jarvis-ai",
   "name": "Jarvis AI (lokal + Top-Cloud)",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "minAppVersion": "1.5.0",
   "description": "KI-Assistent fuer deinen Vault: lokale Modelle ueber Ollama und die staerksten Cloud-Modelle (Claude, GPT, Gemini, HuggingFace, n8n). Mit Werkzeugen (Internet, GitHub, Rechner, MCP), Orakel-Pruefung durch mehrere Modelle, Quellenangaben und Lernen aus jeder Antwort.",
   "author": "mar65vo187",

@@ -6,7 +6,7 @@ Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antwor
 er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
 ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
-**Neu in 2.1.0/2.1.1 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
+**Neu in 2.1 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
 Seiten, liest und schreibt Notizen, rechnet, liest Dateien, führt auf dem Desktop Befehle
 aus, liest Dateien und Aufgaben aus deinem GitHub-Repository, findet Modelle auf
 HuggingFace, löst n8n-Workflows aus und bindet fremde MCP-Server an. Zwei neue Modi
@@ -17,7 +17,7 @@ kommen dazu: **Maximum** (immer die stärksten Modelle, mit Prüflauf) und **Ora
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.1.1 |
+| **Version** | 2.1.2 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
 | **Automatische Tests** | 165 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
@@ -404,7 +404,7 @@ im Manifest, Ladbarkeit des Bündels):
 
 ```bash
 node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
-node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.1 --streng
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.2 --streng
 ```
 
 Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den
