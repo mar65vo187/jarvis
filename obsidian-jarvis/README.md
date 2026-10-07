@@ -311,3 +311,21 @@ tests/                   92 Tests in 8 Dateien inkl. Ende-zu-Ende-Test auf main.
 ```
 
 Beitragen: bitte `npm run typecheck && npm test` grün halten.
+
+### Ist das Release wirklich installierbar?
+
+Bevor eine Version veröffentlicht wird, lässt sich das mit echten Anfragen an GitHub
+nachprüfen — genau in der Reihenfolge, die BRAT verwendet (Release-Dateien, Version
+im Manifest, Ladbarkeit des Bündels):
+
+```bash
+node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.0.0 --streng
+```
+
+Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den
+Versionsabgleich zwischen Tag und Manifest, lädt das veröffentlichte `main.js` **wirklich
+in Node mit einer obsidian-Attrappe** (beweist, dass es ausführbar ist und eine
+Plugin-Klasse mit `onload`/`onunload` exportiert), vergleicht es per SHA-256 mit dem hier
+gebauten Bündel und sucht nach den Merkmalen der Lernfunktionen. Der Release-Workflow
+führt diese Prüfung nach jedem Tag selbst aus.

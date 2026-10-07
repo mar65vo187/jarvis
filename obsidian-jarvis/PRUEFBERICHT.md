@@ -166,7 +166,36 @@ Ollama-Testserver:
 8. **Testnachbau der GitHub-Baum-Schnittstelle** schnitt den Pfad falsch ab (Testfehler,
    kein Produktfehler) — korrigiert, damit der Test wirklich prüft, was er behauptet.
 
-## 10. Was hier nicht geprüft werden konnte
+## 10. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)
+
+Die veröffentlichte Version wurde mit echten Anfragen an GitHub geprüft — in der
+Reihenfolge, in der BRAT installiert (Ergebnis vom 7. Oktober 2026, Version 2.0.0):
+
+```
+✓ Release obsidian-jarvis-2.0.0 gefunden
+✓ Release-Datei "main.js" vorhanden (141.4 KB)
+✓ Release-Datei "manifest.json" vorhanden (0.5 KB)
+✓ Release-Datei "styles.css" vorhanden (4.6 KB)
+✓ manifest.json geladen: jarvis-ai 2.0.0
+✓ Tag-Version obsidian-jarvis-2.0.0 passt zu manifest.json 2.0.0
+✓ main.js lässt sich laden und exportiert eine Plugin-Klasse (48 Methoden)
+✓ main.js enthält das Merkmal "GELERNTES WISSEN"
+✓ main.js enthält das Merkmal "jarvis-brain-"
+✓ Die veröffentlichte main.js ist byte-identisch mit dem hier gebauten Bündel (SHA-256)
+Ergebnis: BRAT kann "mar65vo187/jarvis" installieren (Version obsidian-jarvis-2.0.0).
+```
+
+Das Bündel wurde dabei **wirklich in Node geladen** (mit einer Attrappe für das
+obsidian-Paket): Es exportiert eine Klasse, die von `Plugin` erbt und `onload` sowie
+`onunload` besitzt — genau das, was Obsidian beim Aktivieren tut. Zusätzlich läuft diese
+Prüfung im Workflow nach jedem Tag automatisch (mit drei Versuchen, weil GitHub neue
+Releases manchmal kurz verzögert ausliefert).
+
+Auch der Installationshelfer wurde ausgeführt: `install/install.sh` kopiert in einen
+frischen Vault genau `main.js`, `manifest.json` und `styles.css` (Inhalt per md5 geprüft)
+und legt vor einem Update eine Sicherung der alten Dateien an.
+
+## 11. Was hier nicht geprüft werden konnte
 
 - **Kein echter Modelllauf**: In dieser Umgebung lief kein Ollama-Dienst und es wurden
   keine Cloud-Schlüssel verwendet. **Die Qualität echter Antworten** (und damit, wie
@@ -178,12 +207,14 @@ Ollama-Testserver:
   Nachprüfung, ob Ollama das Profil führt, sind eingebaut.
 - **Kein echter GitHub-Zugriff** und keine Rechteprüfung deines Tokens (dafür
   „Verbindung testen").
-- **Windows-Installer** wurde nicht unter Windows ausgeführt (er kopiert drei Dateien und
-  liest die Vault-Liste; Weg C in der README ist gleichwertig).
+- **Windows-Installer** (`Install-Windows.ps1`, `.cmd`) wurde nicht unter Windows
+  ausgeführt — in dieser Umgebung gibt es kein PowerShell. Geprüft: der Inhalt der Dateien
+  (gleiche Schritte wie `install.sh`, das ausgeführt wurde), und die Installation von Hand
+  sowie über BRAT sind gleichwertige Wege ohne PowerShell.
 - **Aussehen** in echten Obsidian-Themes (nutzt nur Obsidian-CSS-Variablen).
 - **Preistabelle** ist eine Momentaufnahme (Oktober 2026), Schätzung ohne Gewähr.
 
-## 11. Empfohlener erster echter Test bei dir
+## 12. Empfohlener erster echter Test bei dir
 
 1. Einstellungen → Jarvis KI → **Alle Verbindungen prüfen**.
 2. Eine Frage stellen, deren Antwort du kennst (Modus ⚡ Auto). Erwartung: lokale Antwort,

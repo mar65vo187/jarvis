@@ -110,3 +110,19 @@ jobs:
             obsidian-jarvis/manifest.json
             obsidian-jarvis/styles.css
             obsidian-jarvis/obsidian-jarvis-*.zip
+
+      - name: BRAT-Installierbarkeit des Release prüfen
+        working-directory: obsidian-jarvis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for versuch in 1 2 3; do
+            if node install/pruefe-brat.mjs "${{ github.repository }}" "${{ github.ref_name }}" --streng; then
+              exit 0
+            fi
+            echo "Versuch ${versuch} fehlgeschlagen - warte 15 Sekunden..."
+            sleep 15
+          done
+          echo "Das Release ist nicht sauber installierbar - siehe Meldungen oben."
+          exit 1
+

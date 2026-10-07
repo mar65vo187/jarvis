@@ -119,7 +119,7 @@ export class App {
 
 export class Plugin {
   app: App;
-  manifest = { id: 'jarvis-ai', version: '1.0.0' };
+  manifest = { id: 'jarvis-ai', version: '2.0.0' };
   constructor(app: App) {
     this.app = app;
   }

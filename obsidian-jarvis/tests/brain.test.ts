@@ -81,7 +81,7 @@ async function scenario(options: Scenario): Promise<{ server: TestServer; settin
 }
 
 function brainFor(settings: JarvisSettings): Brain {
-  const brain = new Brain(() => settings, '1.0.0');
+  const brain = new Brain(() => settings, '2.0.0');
   brain.setKeyReader((id) => (id === 'openai' ? 'sk-test' : ''));
   return brain;
 }

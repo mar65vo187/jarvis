@@ -243,7 +243,7 @@ describe('Ausgeliefertes Bündel main.js', () => {
   it('lädt, richtet sich ein und beantwortet eine Frage mit Quellenangabe', async () => {
     const { plugin: PluginClass } = loadBundle();
     const { app } = makeApp(NOTES);
-    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '1.0.0' });
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
 
     plugin.loadData = async () => ({ settings: { local: { baseUrl: server.url, defaultModel: 'qwen3:8b' } }, keys: {} });
     plugin.saveData = async () => undefined;
@@ -287,7 +287,7 @@ describe('Ausgeliefertes Bündel main.js', () => {
   it('liefert einen vollständigen Diagnosebericht', async () => {
     const { plugin: PluginClass } = loadBundle();
     const { app } = makeApp(NOTES);
-    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '1.0.0' });
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
     plugin.loadData = async () => ({ settings: { local: { baseUrl: server.url, defaultModel: 'qwen3:8b' } }, keys: {} });
     plugin.saveData = async () => undefined;
     await plugin.onload();
@@ -382,7 +382,7 @@ describe('Ausgeliefertes Bündel main.js', () => {
   it('erklärt verständlich, wenn kein Modell antworten kann', async () => {
     const { plugin: PluginClass } = loadBundle();
     const { app } = makeApp(NOTES);
-    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '1.0.0' });
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
     plugin.loadData = async () => ({ settings: { local: { baseUrl: 'http://127.0.0.1:1', defaultModel: 'qwen3:8b' } }, keys: {} });
     plugin.saveData = async () => undefined;
     await plugin.onload();
