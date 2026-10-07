@@ -1,0 +1,73 @@
+ONLINE MIT OLLAMA CLOUD — OPTIONAL
+Stand der geprueften Anbieterinformationen: 07.10.2026.
+
+Was online bedeutet
+Das Modell rechnet auf Ollamas Servern. Obsidian bleibt die Oberflaeche auf deinem
+PC. Der lokale Ollama-Dienst uebernimmt die Anmeldung und Weiterleitung.
+Dies ist weder ein eigener kostenloser Server noch ein aus der Ferne erreichbarer
+Jarvis. Es ist auch kein automatischer Internetrecherche-Bot.
+
+Kosten ehrlich einordnen
+Ollama bietet im Free-Tarif ein begrenztes monatliches Kontingent fuer eine
+Auswahl von Starter-Modellen. Nicht jedes grosse Modell ist gratis verfuegbar.
+Die Auswahl kann sich aendern. Deshalb wird kein bestimmtes Cloud-Modell als
+dauerhaft kostenlos fest eingebaut.
+https://ollama.com/pricing
+
+Fuer ausschliesslich kostenlose Nutzung: kein Abo, keine gekauften Credits,
+keine automatische Aufladung aktivieren. Konto und Restkontingent selbst pruefen.
+Das Plugin kann deinen Tarif oder Restbetrag nicht auslesen und daher keine
+Kostenfreiheit eines bereits kostenpflichtigen Kontos erzwingen. Es kauft keine
+Credits und schliesst kein Abo ab. Wer garantiert ohne Dienstgebuehren arbeiten
+will, bleibt im lokalen Modus.
+
+Schritt fuer Schritt
+1. Zuerst den lokalen Teil mit 01-EINRICHTEN.cmd einrichten.
+2. https://ollama.com oeffnen und dein eigenes kostenloses Konto anlegen/anmelden.
+   Im Konto die derzeit fuer dich verfuegbaren Gratis-Modelle und Nutzung pruefen.
+3. 02-ONLINE-EINRICHTEN.cmd im entpackten Paket doppelklicken.
+4. Die Anmeldung im Browser selbst abschliessen. Keine Zugangsdaten hier teilen.
+5. Den exakten CLI-Namen eines fuer DEIN Konto freigegebenen Gratis-Modells
+   eingeben. Er muss auf :cloud enden. Die offizielle Anleitung nennt beispielsweise
+   gemma4:cloud als CLI-Namensformat — das ist KEINE Zusage, dass dieses Modell
+   fuer dein Konto gratis ist. Nutze die aktuell in deinem Konto angegebene Auswahl.
+6. Der Helfer registriert nur die Cloud-Zuordnung und prueft deren Metadaten.
+   Er laedt kein riesiges Cloud-Modell auf deinen PC und sendet keine Testfrage.
+7. In Obsidian Marvins KI oeffnen, Betriebsart Online waehlen und Ollama pruefen.
+8. Dein Cloud-Modell auswaehlen und eine Frage eingeben.
+9. In der Vorschau alle uebertragenen Inhalte lesen. Nur wenn Frage und
+   Notizausschnitte online verarbeitet werden duerfen, den Sendeknopf klicken.
+10. Bei Limit, Tarifproblem oder Fehler stoppt die Anfrage. Keine automatischen
+    Wiederholungen und kein stiller Anbieterwechsel. Danach bei Bedarf selbst
+    zurueck auf Lokal schalten.
+
+Welche Inhalte verlassen deinen PC?
+- Deine aktuelle Frage.
+- Die in der Vorschau enthaltenen Notizausschnitte, ggf. Profil und passende
+  Gedächtnisnotizen. Ordnerausschluesse und ki-privat: true gelten weiterhin.
+- Die sichtbaren Systemanweisungen der Anwendung.
+Der vorherige Chatverlauf wird online nicht angehaengt. Jede Folgefrage daher
+vollstaendig formulieren. Die Vorschau zeigt die gesamte Nachrichten-Nutzlast.
+Nicht fuer Online-Verarbeitung geeignete Informationen nicht freigeben.
+Ollama kann Anfragen ausserhalb Deutschlands verarbeiten; Angaben des Anbieters:
+https://ollama.com/privacy
+
+Wenn Online nicht funktioniert
+- Nicht angemeldet: CMD oeffnen, ollama signin eingeben und Anmeldung abschliessen.
+- OLLAMA_NO_CLOUD=1: Der Helfer kann deine Benutzer-Einstellung nach Rueckfrage
+  entfernen. Ollama danach komplett beenden und neu starten. Ein separat
+  gestartetes ollama serve-Fenster ebenfalls schliessen.
+- Cloud bleibt deaktiviert: %USERPROFILE%\.ollama\server.json kann
+  disable_ollama_cloud: true enthalten. Nach eigener Entscheidung die Einstellung
+  auf false setzen und Ollama neu starten. Andere Eintraege behalten. Der Helfer
+  bearbeitet diese Datei nicht. Systemweit gesetzte Sperren mit dem Verantwortlichen
+  klaeren; keine Richtlinien umgehen.
+- Modell fehlt/404: aktuellen CLI-Namen im Ollama-Katalog pruefen und Helfer erneut
+  ausfuehren. Ein API-Modellname und ein CLI-Modellname koennen verschieden sein.
+- 401/403: Anmeldung bzw. Freigabe des Modells pruefen.
+- 429/Kontingent erschoepft: lokal weiterarbeiten oder auf Kontingent-Erneuerung warten.
+- Thinking: Cloud-Modelle verwenden ihre eigenen Standardwerte. Die lokale
+  Einstellung think:false ist kein universeller Cloud-Schalter. Eine Antwort kann
+  deshalb vor dem ersten Text laenger brauchen. Der dreifache Pruefmodus ist online aus.
+
+Offizielle Anleitung: https://docs.ollama.com/cloud

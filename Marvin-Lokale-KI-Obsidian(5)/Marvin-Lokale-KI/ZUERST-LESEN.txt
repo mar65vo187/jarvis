@@ -1,0 +1,185 @@
+MARVIN BRAIN FUER OBSIDIAN — VERSION 2.0.1
+
+FERTIG VORBEREITET: EINRICHTUNG, MODELLPROFILE UND OBSIDIAN-PLUGIN
+Du bekommst ein persoenlich konfiguriertes Qwen-Profil, einen Windows-Helfer,
+Wissenssuche, Chat, Quellen, Korrekturgedaechtnis und eine optionale Cloud-Anbindung.
+Kein neu trainiertes Basismodell. Die Gewichte sind nicht in der ZIP; vorhandene
+Modelle werden wiederverwendet, fehlende beim Einrichten geladen.
+Lokal gibt es keine API-Gebuehren; Hardware und Strom sind erforderlich.
+Online ist nur im jeweiligen Gratis-Kontingent kostenlos. Details separat lesen.
+
+KORREKTUR 2.0.1
+Der PowerShell-Namenskonflikt Cli/Clear-Item wurde beseitigt. Alle eigenen
+Hilfsfunktionen tragen eindeutige Marvin-Namen. Kein Basismodell muss deshalb
+neu heruntergeladen werden. Die Ordnerauswahl zeigt registrierte Vault-Pfade
+an und weist den entpackten Einrichtungsordner als Installationsziel ab.
+Wenn du bisher den Downloadordner gewaehlt hast: In Obsidian den Vault mit deinen
+bisherigen TarifWerk-/Jarvis-Notizen oeffnen. Rechtsklick auf eine bekannte Notiz
+> Im System-Explorer anzeigen. Den uebergeordneten Vault-Ordner verwenden.
+
+SCHRITT FUER SCHRITT — ZUERST NUR LOKAL
+1. ZIP herunterladen. Rechtsklick darauf -> Alle extrahieren.
+   Nicht direkt aus der ZIP starten. Den vollstaendigen Ordner behalten.
+2. Obsidian schliessen. Eine Sicherung deines vorhandenen Vaults ist sinnvoll.
+   Ollama ist bei dir bereits installiert; sonst https://ollama.com/download/windows.
+3. Im entpackten Ordner 01-EINRICHTEN.cmd doppelklicken.
+4. Im Ordnerfenster deinen BESTEHENDEN Obsidian-Vault auswaehlen.
+   Das ist der Ordner mit deinen Notizen und dem Unterordner .obsidian.
+5. Der Helfer prueft Ollama, startet bei Bedarf den lokalen Dienst, verwendet
+   dein vorhandenes qwen3:4b-instruct und erstellt marvin-brain:4b-v2.
+   Fehlt das Basismodell, wird es heruntergeladen. Ein bestehendes gleichnamiges
+   Marvin-Profil wird nicht ueberschrieben; der Helfer meldet dies.
+6. Er sichert vorhandene Plugin-Dateien und ersetzt nur main.js, manifest.json,
+   styles.css im Pluginordner. Notizen, data.json und Plugin-Aktivierung bleiben
+   erhalten. Sicherungsort wird angezeigt: %LOCALAPPDATA%\MarvinBrain\Backups.
+7. Er stellt eine kurze echte Testfrage OHNE Notizen. Erstes Laden kann mehrere
+   Minuten dauern. Antwort und Laufzeit erscheinen im Fenster.
+   FEHLER oder fehlgeschlagener Antworttest bedeutet: noch nicht fertig getestet.
+8. Nach erfolgreichem Test Obsidian starten -> Einstellungen -> Externe
+   Erweiterungen / Community plugins -> Marvin Local Brain aktivieren.
+   Falls externe Erweiterungen deaktiviert sind, diese fuer deinen Vault aktivieren.
+9. Strg+P druecken, Marvins KI oeffnen suchen und auswaehlen.
+10. Lokal lassen -> Ollama pruefen -> marvin-brain:4b-v2 auswaehlen.
+    Gruendlich AUS lassen. Die Modellwahl ist wichtig, weil bestehende Einstellungen
+    absichtlich erhalten bleiben und eventuell noch qwen3.5:2b ausgewaehlt ist.
+11. Frage stellen: Welche offenen Punkte zu TarifWerk stehen in meinen Notizen?
+    Quellen aufklappen und Antwort am Original pruefen.
+12. Danach QUALITAETSTEST.md und Tempo testen verwenden. Falls das 4B-Modell zu viel
+    Speicher benoetigt: Modell entladen, 03-LITE-MODELL.cmd ausfuehren und in Obsidian
+    marvin-brain:lite-v2 waehlen. Lite ist kleiner, nicht automatisch gleich gut.
+
+WAS DIE STARTDATEIEN TUN
+01-EINRICHTEN.cmd: Hauptprofil + Plugin einrichten + echte Antwort pruefen.
+02-ONLINE-EINRICHTEN.cmd: optionale Ollama-Anmeldung + Cloud-Modell registrieren.
+03-LITE-MODELL.cmd: optional qwen3:1.7b laden und marvin-brain:lite-v2 erstellen.
+04-DIAGNOSE.cmd: CPU, RAM, Grafik und Ollama-Modellbelegung anzeigen.
+NUR-LOKAL-AKTIVIEREN.cmd: optional Cloud-Funktionen konto-/benutzerweit deaktivieren.
+
+ONLINE ERST DANACH
+ONLINE-ANLEITUNG.txt vollstaendig lesen. Anmelden musst du dich selbst.
+Cloud-Modell in deinem Gratis-Konto pruefen; keine Credits kaufen oder Abos buchen,
+wenn es kostenlos bleiben soll. Das Plugin kann den Tarif nicht kontrollieren.
+Online gibt es vor jeder Anfrage eine Vorschau aller zu uebertragenden Nachrichten.
+Kein stiller Cloud-Fallback, keine automatischen Wiederholungen, kein dreifacher
+Pruefmodus online. Frueherer Chat wird online nicht angehaengt.
+Ein Cloud-Modell bedeutet nicht automatisch Websuche oder Handy-Fernzugriff.
+
+WENN DER HELFER NICHT STARTET — MANUELLER WEG
+Die CMD-Dateien starten nur den beigelegten PowerShell-Helfer. Keine systemweite
+Ausfuehrungsrichtlinie wird geaendert. Bei einer verwalteten Sperre nicht umgehen,
+sondern die folgenden erlaubten manuellen Schritte nutzen oder Verantwortliche fragen.
+
+A. Obsidian schliessen.
+B. Aus IN-DEINEN-VAULT-KOPIEREN/.obsidian/plugins/marvin-local-brain/ die drei Dateien
+   main.js, manifest.json und styles.css in denselben Pluginpfad deines Vaults
+   kopieren. Eine bestehende data.json behalten. Bei eigenem Konfigurationsordner
+   dessen plugins-Unterordner verwenden. Vorher alte drei Dateien sichern.
+C. Ollama starten. Im entpackten Paket den Ordner Modelle oeffnen.
+D. In die Explorer-Adressleiste cmd schreiben und Enter druecken. Dann eingeben:
+   ollama pull qwen3:4b-instruct
+   ollama create marvin-brain:4b-v2 -f Modelfile
+   Der zweite Befehl aktualisiert ein bereits gleichnamiges Profil. Nur fuer das
+   hier bereitgestellte Marvin-Profil verwenden, nicht fuer fremde eigene Modelle.
+E. Mit Schritt 8 oben fortfahren.
+
+ALLTAEGLICHER START
+Ollama und Obsidian oeffnen -> Marvins KI -> Modell waehlen -> bei Bedarf vorladen.
+Du musst den Einrichtungshelfer nicht taeglich starten. Der PC muss angeschaltet
+sein. Kein Autostart und kein kostenpflichtiger Server werden eingerichtet.
+Wenn du den lokalen Dienst nur mit dem Helfer gestartet hattest, Ollama beim
+naechsten PC-Start wieder aus dem Startmenue oeffnen.
+
+GESCHWINDIGKEIT GEZIELT VERBESSERN
+Dein qwen3.5:2b-Protokoll: 177 Sekunden insgesamt, davon 150 Sekunden Laden,
+8 Sekunden Eingabe und 18 Sekunden Ausgabe (15,36 Token/s).
+Das zeigt vor allem teures Laden. Die Ursache ist damit noch nicht bestimmt.
+
+- Standard: ein Durchgang, think:false, kurze Antwort, begrenzte Quellen,
+  4096 Kontext-Token. Das ist der Startwert fuer Wissensfragen.
+- Modell bleibt nach jeder Anfrage bis zu 10 Minuten geladen. Das belegt RAM.
+  In den Plugin-Einstellungen sind 1, 10 oder 30 Minuten einstellbar.
+- „Modell entladen“ gibt den Modell-Speicher frei; die naechste Frage laedt erneut.
+- „Tempo testen (2 Laeufe)“ misst Ladezeit, Eingabeverarbeitung, Ausgabe,
+  Token/s und Zeit bis zum ersten Text. Es sendet keine Notizen.
+- Lauf 1 kann bereits warm sein, Lauf 2 kann zusaetzlich den Eingabe-Cache nutzen.
+  Der Kurztest beweist keine Geschwindigkeit bei langen Wissensfragen.
+- „Messung kopieren“ kopiert Modell, CPU, RAM, Kontext und Messwerte, keine Chats.
+  Damit laesst sich die weitere Anpassung ohne Raten besprechen.
+
+MODELLWAHL — QUALITAET UND TEMPO GETRENNT PRUEFEN
+Teste zuerst das installierte marvin-brain:4b-v2 und qwen3.5:2b nacheinander:
+jeweils „Tempo testen“, dann dieselben drei Wissensfragen und eine Textaufgabe.
+Nur ein Modell gleichzeitig verwenden; bei Bedarf das vorige erst entladen.
+Pruefe: richtige Angaben? passende Quellen? keine erfundenen Fakten? gute Sprache?
+Waehle das Modell, das auf DEINEN Aufgaben die bessere Mischung liefert.
+
+Ein groesseres Modell ist keine automatische Beschleunigung. qwen3.5:4b jetzt
+blind zu laden loest das beobachtete Ladeproblem nicht. CPU und GPU sind noch
+nicht bestimmt. Bei knappem RAM Browser-Tabs und andere grosse Apps schliessen.
+Modelldateien auf einer SSD helfen, falls langsames Speichern der Engpass ist.
+Ein optionales kleineres Vergleichsmodell kann per 03-LITE-MODELL.cmd
+geladen werden; es kostet einen weiteren Download und kann schwaechere Antworten liefern.
+
+GRUENDLICHER MODUS
+Nur bei schwierigen Aufgaben einschalten: Entwurf → Kritik → Endfassung.
+Drei Aufrufe desselben Modells; entsprechend mehr Zeit. Die Kritik ist sichtbar.
+Das ist keine unabhaengige Verifikation und garantiert keine bessere Antwort.
+Es macht ein kleines lokales Modell nicht so stark wie grosse Spitzenmodelle.
+
+WISSEN UND GEDAECHTNIS
+- Neue/geaenderte Markdown-Notizen werden bei der naechsten Frage neu durchsucht.
+- Suchverfahren: gewichtete Woerter und Notiztitel. Kein zweites Embedding-Modell,
+  kein Zusatzserver. Synonyme und Vollstaendigkeit sind deshalb nicht garantiert.
+- Frage mit konkreten Projekt- oder Notiznamen. Fuer eine bestimmte Notiz kannst
+  du „Geoeffnete Notiz einbeziehen“ einschalten.
+- Die letzten 20 Antworten werden in data.json gespeichert und wieder angezeigt.
+  Nur ein kurzer Ausschnitt der Unterhaltung wird als Modellkontext verwendet.
+- „Korrektur / Praeferenz merken“ speichert DEINE bestaetigte Angabe in
+  „62 KI Gedaechtnis“. Passende Angaben werden bei weiteren Fragen gesucht.
+  Es ist kein Training des Modells und keine Garantie, jede Angabe immer abzurufen.
+- „Hilfreich“ / „Fehlerhaft“ speichert eine Bewertung; allein dadurch aendert
+  sich das Modell nicht. Nutze konkrete Korrekturen fuer persoenliches Wissen.
+- „Als Wissensnotiz speichern“ oder „Als Aufgabennotiz speichern“ oeffnet einen
+  bearbeitbaren Entwurf. Erst dein Speicherklick erstellt eine neue Datei.
+  Ergebnisse liegen in „61 KI Ergebnisse“ und gelten als ungeprueft.
+- Gepruefte Erkenntnisse manuell in deine Wissensnotizen uebernehmen.
+  Veraltete Korrekturen bearbeiten oder archivieren, damit sie nicht widersprechen.
+
+DATEN UND GRENZEN
+Das Plugin spricht nur den lokalen Dienst 127.0.0.1:11434 an. Im lokalen Modus
+werden Cloud-Verweise abgewiesen. Im bewusst gewaehlten Online-Modus leitet Ollama
+freigegebene Nachrichten an Ollama Cloud weiter. Eine neue Ansicht startet lokal.
+
+Markdown-Notizen werden gelesen; keine PDFs, Bilder oder sonstigen Anhaenge.
+Standardmaessig ausgenommen: 90 Vorlagen, 99 Archiv und 61 KI Ergebnisse.
+Zusaetzlich schliesst die Notizeigenschaft ki-privat: true eine Datei von der Suche
+aus. Ein Ausschluss loescht bereits gespeicherte Antworten und Entwuerfe nicht.
+Chatdaten sind lokale Dateien, nicht gesondert verschluesselt. Vault-Synchronisation
+oder Backups koennen sie ebenfalls uebertragen.
+
+Indexgrenzen: maximal 300 KB je Notiz und 8 Millionen Zeichen insgesamt.
+Auslassungen werden angezeigt. Die Quellenliste zeigt benutzten Kontext und ist
+kein automatischer Beweis fuer jede Aussage. Fehlende Fakten nachfragen.
+
+PROBLEME UND WIEDERHERSTELLUNG
+- Plugin fehlt: Dateien direkt im Zielordner? Obsidian neu gestartet? Plugin aktiviert?
+- Ollama nicht erreichbar: Ollama aus dem Startmenue starten; 04-DIAGNOSE.cmd ausfuehren.
+- Speicherfehler: grosse Apps schliessen, anderes Modell entladen, Lite vergleichen.
+- Langsames Laden: Modell vorladen; SSD und RAM-Auslastung pruefen. Nicht mehrere
+  lokale Modelle gleichzeitig betreiben. 4096 Kontext zunaechst beibehalten.
+- Netzwerk-/Downloadfehler: Internet und Ollama pruefen, Helfer erneut starten.
+- Antwort abgebrochen: kuerzere Teilfrage stellen. Kein vollstaendiges Ergebnis behauptet.
+- Schlechte Wissensantwort: passende Quelle anzeigen lassen; konkrete Notiz nennen;
+  Widersprueche im Vault korrigieren. Ein groesserer Prompt ersetzt keine guten Quellen.
+- Vorheriges Plugin wiederherstellen: Obsidian schliessen, die gesicherten drei Dateien
+  aus dem angezeigten Backups-Ordner in den Pluginordner kopieren, Obsidian starten.
+- Deaktivieren: Marvin Local Brain in Obsidian ausschalten. Notizen bleiben erhalten.
+
+GEPRUEFT UND NOCH OFFEN
+JavaScript-Syntax und Integration mit simuliertem Ollama/Obsidian getestet, inklusive
+Cloud-Freigabe, Abbruch, Kontingentfehler, Wissenssuche und Chat-Wiederherstellung.
+Der PowerShell-Helfer wurde hier NICHT unter Windows ausgefuehrt. Kein echter
+Basismodell- oder Cloud-Lauf in dieser Umgebung; kein Zugriff auf deinen PC.
+Erst der Antworttest auf deinem PC und der Obsidian-Qualitaetstest belegen den
+realen Betrieb. Du musst Vault auswaehlen, Plugin aktivieren und ggf. online anmelden.
+Pruefbericht, Quellcode und Quellen liegen bei. Desktop-Obsidian ab 1.5 erforderlich.
