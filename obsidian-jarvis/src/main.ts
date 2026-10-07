@@ -130,7 +130,16 @@ export default class JarvisPlugin extends Plugin {
     // Gelerntes Wissen als Notizen nachziehen (z. B. nach einem Update oder Sync)
     window.setTimeout(() => {
       void this.assistant
-        .syncMemoryNotes()
+        .restoreLessonsFromNotes()
+        .then((wiederhergestellt) => {
+          if (wiederhergestellt > 0) {
+            new Notice(
+              `Jarvis: ${wiederhergestellt} gelernte Lektion(en) aus "${this.settings.learning.memoryFolder}" wiederhergestellt.`,
+              8000,
+            );
+          }
+          return this.assistant.syncMemoryNotes();
+        })
         .then((result) => {
           if (result.written > 0) {
             new Notice(`Jarvis: ${result.written} gelernte Notiz(en) im Ordner "${this.settings.learning.memoryFolder}" angelegt.`, 8000);
@@ -552,6 +561,20 @@ export default class JarvisPlugin extends Plugin {
       callback: async () => {
         const result = await this.assistant.syncMemoryNotes();
         new Notice(`Gelernte Notizen: ${result.written} neu angelegt, ${result.existing} bereits vorhanden.`, 10000);
+      },
+    });
+
+    this.addCommand({
+      id: 'learning-restore',
+      name: 'Lernen: Gelerntes aus den Notizen wiederherstellen',
+      callback: async () => {
+        const anzahl = await this.assistant.restoreLessonsFromNotes();
+        new Notice(
+          anzahl > 0
+            ? `Jarvis: ${anzahl} Lektion(en) aus den Notizen wiederhergestellt.`
+            : 'Jarvis: keine neuen Lektionen in den Notizen gefunden (oder das Lernen ist abgeschaltet).',
+          10000,
+        );
       },
     });
 

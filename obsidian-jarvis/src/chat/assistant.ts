@@ -390,6 +390,33 @@ export class Assistant {
   }
 
   /** Auch für automatisch gemerkte Lektionen die Notiz nachziehen. */
+  /**
+   * Gelerntes aus den Markdown-Notizen im Vault zurückholen. Nötig, wenn der
+   * Lernspeicher (cache/learning.json) fehlt — nach einer Neuinstallation, auf einem
+   * anderen Rechner oder nach dem Löschen des Zwischenspeichers. Damit sind die Notizen
+   * (und über die GitHub-Sicherung auch das Repository) die dauerhafte Quelle.
+   */
+  async restoreLessonsFromNotes(): Promise<number> {
+    const settings = this.deps.settings();
+    const store = this.learningStore();
+    const notes = this.deps.learning?.notes;
+    if (!store || !notes || !settings.learning.enabled || !settings.learning.writeNotes) return 0;
+    try {
+      const gefunden = await notes.importAll();
+      let neu = 0;
+      for (const lesson of gefunden) {
+        if (await store.adopt(lesson)) neu++;
+      }
+      if (neu > 0) {
+        await store.flush();
+        await this.deps.persistSettings?.();
+      }
+      return neu;
+    } catch {
+      return 0;
+    }
+  }
+
   async syncMemoryNotes(): Promise<{ written: number; existing: number }> {
     const store = this.learningStore();
     const notes = this.deps.learning?.notes;

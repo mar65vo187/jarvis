@@ -31,7 +31,10 @@ interface LoadedPlugin {
       sources: Array<{ path: string; id: string }>;
       lessons: Array<{ id: string; question: string }>;
       learned?: { saved: boolean; id?: string; notePath?: string };
+      userMessage: string;
     }>;
+    restoreLessonsFromNotes: () => Promise<number>;
+    syncMemoryNotes: () => Promise<{ written: number; existing: number }>;
   };
   listAllModels: () => Promise<Array<{ id: string; local: boolean }>>;
   testEverything: () => Promise<string[]>;
@@ -377,6 +380,64 @@ describe('Ausgeliefertes Bündel main.js', () => {
     expect(report).toContain('Lektionen:');
     expect(report).toContain('Qualitätsverlauf');
     plugin.onunload();
+  });
+
+  it('holt nach einer Neuinstallation das Gelernte aus den Notizen zurück', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app, store } = makeApp(NOTES);
+    const EINSTELLUNGEN = {
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        learning: { enabled: true, saveMode: 'auto', learnFrom: 'all', writeNotes: true, memoryFolder: 'Jarvis Gedächtnis' },
+        cloud: { openai: { enabled: true, baseUrl: server.url, defaultModel: 'gpt-6-astra', kind: 'openai', label: 'GPT' } },
+      },
+      keys: { 'jarvis-ai-openai': 'sk-test' },
+    };
+    const starten = async () => {
+      const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+      plugin.loadData = async () => EINSTELLUNGEN;
+      plugin.saveData = async () => undefined;
+      await plugin.onload();
+      return plugin;
+    };
+
+    // Erste Installation: zwei Lektionen lernen
+    const erste = await starten();
+    await erste.assistant.ask({ question: 'Wann endet Projekt Alpha?', mode: 'vault', route: 'cloud', history: [] });
+    await erste.assistant.ask({ question: 'Wer ist Ansprechpartnerin im Projekt Alpha?', mode: 'vault', route: 'cloud', history: [] });
+    expect(erste.learning.count()).toBe(2);
+    const notizen = [...store.keys()].filter((path) => path.startsWith('Jarvis Gedächtnis/') && path.endsWith('.md'));
+    expect(notizen).toHaveLength(2);
+    erste.onunload();
+
+    // Neuinstallation: Zwischenspeicher weg, Notizen im Vault bleiben
+    store.delete('.obsidian/plugins/jarvis-ai/cache/learning.json');
+    expect(store.has('.obsidian/plugins/jarvis-ai/cache/learning.json')).toBe(false);
+
+    const zweite = await starten();
+    expect(zweite.learning.count()).toBe(0); // wirklich leer gestartet
+    const zurueck = await zweite.assistant.restoreLessonsFromNotes();
+    expect(zurueck).toBe(2);
+    expect(zweite.learning.count()).toBe(2);
+    expect(zweite.learning.list()).toHaveLength(2);
+
+    // Das wiederhergestellte Wissen wird sofort wieder verwendet
+    const antwort = await zweite.assistant.ask({
+      question: 'Wann endet Projekt Alpha?',
+      mode: 'vault',
+      route: 'local',
+      history: [],
+    });
+    expect(antwort.lessons.length).toBeGreaterThan(0);
+    const gesendet = JSON.parse(server.requests.filter((request) => request.url === '/api/chat').at(-1)!.body) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(gesendet.messages.at(-1)!.content).toContain('GELERNTES WISSEN');
+
+    // Erneutes Wiederherstellen erzeugt keine Dubletten
+    expect(await zweite.assistant.restoreLessonsFromNotes()).toBe(0);
+    expect(zweite.learning.count()).toBe(2);
+    zweite.onunload();
   });
 
   it('erklärt verständlich, wenn kein Modell antworten kann', async () => {

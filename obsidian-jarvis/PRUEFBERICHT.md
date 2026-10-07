@@ -1,4 +1,4 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.0.0
+# Prüfbericht — Jarvis AI für Obsidian 2.0.1
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
@@ -6,7 +6,7 @@ Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stan
 
 ## Kurzfassung
 
-**92 Tests in 8 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
+**96 Tests in 8 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
 Geprüft wurde gegen echte HTTP-Server auf `127.0.0.1` (kein Attrappen-Netzwerk), mit
 echten Git-Objekt-Hashes, echtem DOM und einem Ende-zu-Ende-Test auf der ausgelieferten
 Datei `main.js`. TypeScript läuft im `strict`-Modus fehlerfrei.
@@ -47,7 +47,7 @@ gelerntes Wissen mitgeliefert wird.
 - **Abgeschaltetes Lernen** ändert nichts am bisherigen Verhalten (keine Lektion, kein
   `GELERNTES WISSEN` im Prompt).
 
-## 2. Lern-Bausteine (`tests/learning.test.ts`, 18 Tests)
+## 2. Lern-Bausteine (`tests/learning.test.ts`, 21 Tests)
 
 **Qualitätsmessung**
 - Schlüsselbegriffe werden aus den Quellen gezogen — Eigennamen und Zahlen zuerst,
@@ -92,6 +92,12 @@ gelerntes Wissen mitgeliefert wird.
   Frage, gelernte Antwort, Korrektur (falls vorhanden) und Quellenverweise `[[…]]`.
 - Nur fehlende Notizen werden angelegt (zweiter Lauf: 0 neu, 2 vorhanden).
 - Mit `writeNotes: false` wird nichts geschrieben.
+- **Wiederherstellung**: Eine Notiz wird wieder vollständig als Lektion eingelesen
+  (Frage, Antwort, Modell, Grund, Bewertung, Korrektur, Quellen) — mit ihrer
+  ursprünglichen Kennung, sodass keine Dubletten entstehen. Änderungen von Hand werden
+  übernommen. Eine von Hand gekürzte Notiz (nur Überschrift + Text) wird ebenfalls
+  eingelesen, und eine Notiz ohne das Merkmal `jarvis-gelernt: true` bleibt unberührt.
+  Ohne `jarvis-id` ist die vergebene Kennung über mehrere Läufe stabil.
 
 ## 3. Anbieter (`tests/providers.test.ts`, 11 Tests)
 
@@ -136,7 +142,7 @@ Qualität), Fehlerfall mit Hilfestellung und Cloud-Retry, Abbruch, Ausweichhinwe
 Quellenklick, Aufräumen beim Schließen, Verlaufsverwaltung (Titel, Wechsel, Löschen,
 Begrenzung auf 40 Beiträge).
 
-## 8. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 4 Tests)
+## 8. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 5 Tests)
 
 Geladen wird die echte `main.js` in einer nachgebauten Obsidian-Umgebung, mit echtem
 Ollama-Testserver:
@@ -150,6 +156,11 @@ Ollama-Testserver:
   Modell; Destillation legt über die echte Ollama-Schnittstelle `/api/create` das Profil
   `jarvis-brain-v1` an (Modelfile mit `FROM qwen3:8b`, `SYSTEM`, `MESSAGE`), der
   Lernbericht enthält Lektionen und Qualitätsverlauf.
+- **Neuinstallation im Test**: Zwischenspeicher `cache/learning.json` gelöscht, Notizen
+  bleiben im Vault → das frische Plugin startet mit 0 Lektionen, holt über
+  `restoreLessonsFromNotes()` beide Lektionen aus den Markdown-Notizen zurück, verwendet
+  sie sofort wieder im Prompt an das lokale Modell und erzeugt beim zweiten Lauf keine
+  Dubletten.
 - Nicht erreichbarer Dienst → verständliche Fehlermeldung.
 
 ## 9. Während der Entwicklung gefundene und behobene Fehler
@@ -163,7 +174,10 @@ Ollama-Testserver:
 6. **Irrelevante Lektionen** wurden ohne echte Wortübereinstimmung verwendet (nur wegen
    ihres Alters) → jetzt harte Mindestübereinstimmung.
 7. **Speicherverzögerungen** machten Tests unnötig langsam → einstellbare Verzögerung.
-8. **Testnachbau der GitHub-Baum-Schnittstelle** schnitt den Pfad falsch ab (Testfehler,
+8. **Wiederherstellung las Abschnitte falsch**: Ein Abschnittsmuster mit einem in
+   JavaScript nicht vorhandenen Zeilenende-Kürzel (`\Z`) schnitt Quellen und Antworten
+   ab. Ersetzt durch sauberes Zerlegen der Notiz in Abschnitte.
+9. **Testnachbau der GitHub-Baum-Schnittstelle** schnitt den Pfad falsch ab (Testfehler,
    kein Produktfehler) — korrigiert, damit der Test wirklich prüft, was er behauptet.
 
 ## 10. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)

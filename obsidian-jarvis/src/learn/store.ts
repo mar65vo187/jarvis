@@ -169,6 +169,30 @@ export class LearningStore {
     return lesson;
   }
 
+  /**
+   * Eine Lektion mit ihrer ursprünglichen Kennung und Zeit übernehmen — für den
+   * Weg zurück aus den Markdown-Notizen (nach Neuinstallation oder Rechnerwechsel).
+   * Gibt `true` zurück, wenn sie wirklich neu aufgenommen wurde.
+   */
+  async adopt(lesson: Lesson): Promise<boolean> {
+    if (this.get(lesson.id)) return false;
+    const key = makeDedupeKey(lesson.question, lesson.answer);
+    if (this.lessons.some((vorhanden) => makeDedupeKey(vorhanden.question, vorhanden.answer) === key)) return false;
+    if (!lesson.question.trim() || !lesson.answer.trim()) return false;
+    this.lessons.push({
+      ...lesson,
+      terms: lesson.terms?.length ? dedupeTerms(lesson.terms) : dedupeTerms([...tokenize(lesson.question), ...tokenize(lesson.answer.slice(0, 1500))]),
+      sources: dedupeSources(lesson.sources ?? []),
+      rating: lesson.rating ?? 'auto',
+      usedCount: lesson.usedCount ?? 0,
+      lastUsedAt: lesson.lastUsedAt ?? 0,
+    });
+    this.lessons.sort((a, b) => a.createdAt - b.createdAt);
+    await this.trim(this.settings().maxLessons);
+    await this.save();
+    return true;
+  }
+
   async rate(id: string, rating: Lesson['rating']): Promise<void> {
     const lesson = this.get(id);
     if (!lesson) return;

@@ -1,6 +1,6 @@
 {
   "name": "jarvis-ai-obsidian",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Jarvis AI fuer Obsidian - lokale Modelle (Ollama) + Top-Cloud-Modelle (Claude, GPT, Gemini) + Vault-Wissen + GitHub-Backup",
   "private": true,
   "type": "module",

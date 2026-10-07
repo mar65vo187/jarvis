@@ -46,7 +46,7 @@ class MemoryNoteStore implements MemoryNoteFs {
   }
 }
 
-function settings(overrides: Partial<LearningSettings> = {}): () => LearningSettings {
+function settingsFactory(overrides: Partial<LearningSettings> = {}): () => LearningSettings {
   const merged = mergeSettings({ learning: overrides });
   return () => merged.learning;
 }
@@ -106,7 +106,7 @@ describe('Qualitätsmessung', () => {
 describe('Lernspeicher', () => {
   it('speichert, findet und führt Dubletten zusammen', async () => {
     const json = new MemoryJson();
-    const store = new LearningStore(json, settings(), 0);
+    const store = new LearningStore(json, settingsFactory(), 0);
     await store.load();
 
     const lesson = await store.add({
@@ -138,7 +138,7 @@ describe('Lernspeicher', () => {
 
   it('überlebt einen Neustart vollständig', async () => {
     const json = new MemoryJson();
-    const first = new LearningStore(json, settings(), 0);
+    const first = new LearningStore(json, settingsFactory(), 0);
     await first.load();
     await first.add({
       question: 'Was kostet das Angebot?',
@@ -152,7 +152,7 @@ describe('Lernspeicher', () => {
     await first.recordCall('openai/gpt-6-astra', { ms: 1200, ok: true, quality: 0.9 });
     await first.flush();
 
-    const second = new LearningStore(json, settings(), 0);
+    const second = new LearningStore(json, settingsFactory(), 0);
     await second.load();
     expect(second.count()).toBe(1);
     const snapshot = second.snapshot();
@@ -164,7 +164,7 @@ describe('Lernspeicher', () => {
 
   it('verkraftet eine beschädigte Datei ohne Absturz', async () => {
     const json = new MemoryJson('{kaputt');
-    const store = new LearningStore(json, settings(), 0);
+    const store = new LearningStore(json, settingsFactory(), 0);
     await store.load();
     expect(store.count()).toBe(0);
     const lesson = await store.add({
@@ -180,7 +180,7 @@ describe('Lernspeicher', () => {
   });
 
   it('bewertet, korrigiert und bevorzugt Gutes', async () => {
-    const store = new LearningStore(new MemoryJson(), settings());
+    const store = new LearningStore(new MemoryJson(), settingsFactory());
     await store.load();
     const good = await store.add({
       question: 'Wie lautet die Rechnungsnummer von Alpha?',
@@ -210,7 +210,7 @@ describe('Lernspeicher', () => {
   });
 
   it('hält die Obergrenze ein und wirft Schlechtes zuerst weg', async () => {
-    const store = new LearningStore(new MemoryJson(), settings({ maxLessons: 20 }), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({ maxLessons: 20 }), 0);
     await store.load();
     for (let index = 0; index < 26; index++) {
       const lesson = await store.add({
@@ -230,7 +230,7 @@ describe('Lernspeicher', () => {
   });
 
   it('gibt den Verlauf und den Bericht aus', async () => {
-    const store = new LearningStore(new MemoryJson(), settings());
+    const store = new LearningStore(new MemoryJson(), settingsFactory());
     await store.load();
     await store.recordQuality({ local: 0.3, cloud: 0.8, kind: 'upgrade' });
     await store.recordQuality({ local: 0.5, kind: 'answer' });
@@ -244,7 +244,7 @@ describe('Lernspeicher', () => {
   });
 
   it('zählt neue Lektionen für das automatische Verbessern', async () => {
-    const store = new LearningStore(new MemoryJson(), settings());
+    const store = new LearningStore(new MemoryJson(), settingsFactory());
     await store.load();
     const base = {
       question: 'Was ist der Status im Projekt Bericht?',
@@ -318,7 +318,7 @@ describe('Destillation (lokales Modell verbessern)', () => {
   });
 
   it('plant Beispiele, überspringt Ungeeignetes und vergibt Versionen', async () => {
-    const store = new LearningStore(new MemoryJson(), settings({ distillMaxExamples: 5 }), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({ distillMaxExamples: 5 }), 0);
     await store.load();
     for (const input of lessons()) await store.add(input);
 
@@ -347,7 +347,7 @@ describe('Destillation (lokales Modell verbessern)', () => {
     const installed = ['qwen3:8b', 'jarvis-brain-v1', 'jarvis-brain-v2'];
     const learning = mergeSettings({ learning: {} });
 
-    const emptyStore = new LearningStore(new MemoryJson(), settings({}), 0);
+    const emptyStore = new LearningStore(new MemoryJson(), settingsFactory({}), 0);
     await emptyStore.load();
     const emptyDistiller = new Distiller({
       ollama: { createModel: async () => undefined, deleteModel: async () => undefined, listModels: async () => [] },
@@ -357,7 +357,7 @@ describe('Destillation (lokales Modell verbessern)', () => {
     });
     expect(emptyDistiller.validate(emptyDistiller.plan())).toContain('noch nichts gelernt');
 
-    const store = new LearningStore(new MemoryJson(), settings({}), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({}), 0);
     await store.load();
     for (const input of lessons()) await store.add(input);
 
@@ -391,7 +391,7 @@ describe('Destillation (lokales Modell verbessern)', () => {
   });
 
   it('meldet klar, wenn Ollama das Profil nicht anlegt', async () => {
-    const store = new LearningStore(new MemoryJson(), settings({}), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({}), 0);
     await store.load();
     for (const input of lessons()) await store.add(input);
     const learning = mergeSettings({ learning: {} });
@@ -409,7 +409,7 @@ describe('Gelerntes als Markdown-Notizen', () => {
   it('schreibt Notizen mit Kopfbereich und Quellen', async () => {
     const fs = new MemoryNoteStore();
     const learning = mergeSettings({ learning: {} });
-    const store = new LearningStore(new MemoryJson(), settings({}), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({}), 0);
     await store.load();
     const lesson = await store.add({
       question: 'Wann endet Projekt Alpha?',
@@ -435,7 +435,7 @@ describe('Gelerntes als Markdown-Notizen', () => {
   it('legt nur fehlende Notizen an und entfernt auf Wunsch', async () => {
     const fs = new MemoryNoteStore();
     const learning = mergeSettings({ learning: {} });
-    const store = new LearningStore(new MemoryJson(), settings({}), 0);
+    const store = new LearningStore(new MemoryJson(), settingsFactory({}), 0);
     await store.load();
     const first = await store.add({
       question: 'Erste Frage zum Angebot',
@@ -486,5 +486,97 @@ describe('Gelerntes als Markdown-Notizen', () => {
     });
     expect(path).toBe('');
     expect(fs.files.size).toBe(0);
+  });
+});
+
+describe('Wiederherstellung aus den Notizen (nach Neuinstallation oder Rechnerwechsel)', () => {
+  it('liest eine Notiz wieder als Lektion ein (Hin- und Rückweg)', async () => {
+    const settings = settingsFactory();
+    const fs = new MemoryNoteStore();
+    const notes = new MemoryNotes(fs, settings);
+    const store = new LearningStore(new MemoryJson(), settings, 0);
+    const lektion = await store.add({
+      question: 'Wann endet Projekt Alpha?',
+      answer: 'Am 15. November. Ansprechpartnerin ist Frau Berger.',
+      provider: 'openai',
+      model: 'gpt-6-astra',
+      reason: 'upgrade',
+      sources: [{ path: 'Projekt Alpha.md', heading: 'Status' }],
+      rating: 'good',
+      correction: 'Abgabe ist der 20. November.',
+    });
+    const path = await notes.save(lektion);
+    const inhalt = (await fs.read(path))!;
+
+    // Neuer, leerer Speicher — wie nach einer Neuinstallation
+    const frisch = new LearningStore(new MemoryJson(), settings, 0);
+    expect(frisch.count()).toBe(0);
+
+    const gelesen = notes.parse(path, inhalt)!;
+    expect(gelesen.id).toBe(lektion.id);
+    expect(gelesen.question).toBe('Wann endet Projekt Alpha?');
+    expect(gelesen.answer).toContain('15. November');
+    expect(gelesen.provider).toBe('openai');
+    expect(gelesen.model).toBe('gpt-6-astra');
+    expect(gelesen.reason).toBe('upgrade');
+    expect(gelesen.rating).toBe('good');
+    expect(gelesen.correction).toContain('20. November');
+    expect(gelesen.sources).toEqual([{ path: 'Projekt Alpha.md', heading: 'Status' }]);
+
+    expect(await frisch.adopt(gelesen)).toBe(true);
+    expect(frisch.count()).toBe(1);
+    expect(frisch.get(lektion.id)?.question).toBe(lektion.question);
+    // Der Suchindex funktioniert danach wieder
+    expect(frisch.search('Wann endet Projekt Alpha?').length).toBe(1);
+    // Zweimal übernehmen ergibt keine Dublette
+    expect(await frisch.adopt(gelesen)).toBe(false);
+    expect(frisch.count()).toBe(1);
+  });
+
+  it('nimmt Änderungen von Hand mit und ignoriert fremde Notizen', async () => {
+    const settings = settingsFactory();
+    const fs = new MemoryNoteStore();
+    const notes = new MemoryNotes(fs, settings);
+    const store = new LearningStore(new MemoryJson(), settings, 0);
+    const lektion = await store.add({
+      question: 'Wer ist Ansprechpartnerin?',
+      answer: 'Frau Berger.',
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      reason: 'escalation',
+      sources: [{ path: 'Projekt Alpha.md' }],
+    });
+    const path = await notes.save(lektion);
+    // Nutzer ändert die Antwort in der Notiz
+    const geaendert = (await fs.read(path))!.replace('Frau Berger.', 'Frau Berger (Tel. 069-1234).');
+    await fs.write(path, geaendert);
+
+    const liste = await notes.importAll();
+    expect(liste).toHaveLength(1);
+    expect(liste[0].answer).toContain('069-1234');
+    expect(liste[0].provider).toBe('anthropic');
+    expect(liste[0].model).toBe('claude-opus-5-5');
+
+    // Eine normale Notiz ohne Merkmal wird nicht eingelesen
+    await fs.write('Jarvis Gedächtnis/Normale Notiz.md', '# Einkaufsliste\n\n- Milch\n- Brot\n');
+    const danach = await notes.importAll();
+    expect(danach).toHaveLength(1);
+  });
+
+  it('kommt mit einer von Hand gekürzten Notiz zurecht', async () => {
+    const settings = settingsFactory();
+    const fs = new MemoryNoteStore();
+    const notes = new MemoryNotes(fs, settings);
+    await fs.write(
+      'Jarvis Gedächtnis/Lektion kaputt.md',
+      ['---', 'jarvis-gelernt: true', '---', '# Gelernt: Was ist mit Rechnung RE-2026-114?', '', 'Sie ist offen.', ''].join('\n'),
+    );
+    const liste = await notes.importAll();
+    expect(liste).toHaveLength(1);
+    expect(liste[0].question).toContain('RE-2026-114');
+    expect(liste[0].answer).toBe('Sie ist offen.');
+    // Ohne jarvis-id bleibt die Kennung über mehrere Läufe stabil
+    const zweiterLauf = await notes.importAll();
+    expect(zweiterLauf[0].id).toBe(liste[0].id);
   });
 });

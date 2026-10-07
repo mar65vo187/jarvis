@@ -10,9 +10,9 @@ ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.0.0 |
+| **Version** | 2.0.1 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 92 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 96 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -64,7 +64,15 @@ getan hat. Die Lektionen liegen doppelt:
 Wenn du eine Antwort korrigierst („Korrigieren"-Knopf), gilt ab dann deine Fassung: Sie
 wird bevorzugt zitiert, als Regel gespeichert und in das lokale Modell eingebaut.
 
-**3. Destillation (dauerhaft im lokalen Modell)**
+**3. Die Notizen als dauerhafte Quelle**
+Das Gelernte steht als Markdown in `Jarvis Gedächtnis/`. Fehlt der schnelle Speicher
+`cache/learning.json` — nach einer Neuinstallation, auf einem anderen Rechner oder wenn
+der Zwischenspeicher geleert wurde — holt Jarvis das Wissen beim Start automatisch
+aus den Notizen zurück (zusätzlich per Befehl „Gelerntes aus den Notizen
+wiederherstellen"). Über die GitHub-Sicherung wandert es mit in dein Repository: Dein
+Wissen gehört dir, nicht dem Plug-in-Ordner.
+
+**4. Destillation (dauerhaft im lokalen Modell)**
 „Lernmodell bauen" (Knopf 🎓 oder Befehl) schreibt die besten gelernten Fragen/Antworten
 und deine Regeln in ein **neues Ollama-Modellprofil** — z. B. `jarvis-brain-v3` — und macht
 es zu deinem lokalen Standardmodell. Danach trägt dein lokales Modell das Gelernte
@@ -199,6 +207,7 @@ diese Cloud-Antworten machen deine lokale KI besser.**
 | Jarvis: Lernen: Was hat Jarvis gelernt? | Bericht mit Qualitätsverlauf |
 | Jarvis: Lernen: Lokales Modell aus Gelerntem verbessern | Destillation starten |
 | Jarvis: Lernen: Gelerntes als Notizen ablegen | Markdown-Dateien nachziehen |
+| Jarvis: Lernen: Gelerntes aus den Notizen wiederherstellen | Wissen nach Neuinstallation zurückholen |
 | Jarvis: Lernen: Gelerntes Wissen löschen | Lernspeicher leeren |
 | Jarvis: Wissensindex neu aufbauen | Notizen neu einlesen |
 | Jarvis: Lokales Modell aus dem Speicher entladen | RAM freigeben |
@@ -244,7 +253,8 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
   und passende Lektionen — kein Vault-Upload, kein Verlauf.
 - Notizen mit `ki-privat: true` werden nie gelesen.
 - Gelerntes liegt in `cache/learning.json` **und** als Markdown im konfigurierten
-  Gedächtnisordner (dadurch in GitHub-Backups enthalten).
+  Gedächtnisordner (dadurch in GitHub-Backups enthalten). Fehlt der Zwischenspeicher,
+  wird das Wissen beim Start aus den Notizen wiederhergestellt.
 - API-Schlüssel im Obsidian-Schlüsseltresor, sonst in `data.json` (die Einstellungen
   sagen dir, welcher Fall gilt).
 
@@ -307,7 +317,7 @@ src/
   github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
   obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
-tests/                   92 Tests in 8 Dateien inkl. Ende-zu-Ende-Test auf main.js
+tests/                   96 Tests in 8 Dateien inkl. Ende-zu-Ende-Test auf main.js
 ```
 
 Beitragen: bitte `npm run typecheck && npm test` grün halten.

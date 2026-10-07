@@ -119,11 +119,132 @@ export class MemoryNotes {
     return { written, existing: known.size };
   }
 
+  /**
+   * Eine Notiz zurück in eine Lektion übersetzen. Damit ist der Vault (und über die
+   * GitHub-Sicherung auch das Repository) die dauerhafte Quelle des Gelernten: Auch
+   * nach einer Neuinstallation oder auf einem anderen Rechner ist das Wissen wieder da.
+   *
+   * Verträgt Änderungen von Hand: fehlende Bereiche werden aus dem Text erschlossen.
+   */
+  parse(path: string, content: string): Lesson | null {
+    if (!content.includes(`${MEMORY_FRONTMATTER_FLAG}: true`)) return null;
+    const frontmatter = /^---\n([\s\S]*?)\n---/.exec(content)?.[1] ?? '';
+    const feld = (name: string): string => {
+      const treffer = new RegExp(`^${name}:\\s*(.*)$`, 'm').exec(frontmatter);
+      return treffer ? treffer[1].trim() : '';
+    };
+
+    // In Abschnitte zerlegen (## Überschrift) — stabiler als Muster mit Zeilenenden.
+    const abschnitte = new Map<string, string>();
+    let laufenderTitel: string | null = null;
+    let puffer: string[] = [];
+    const uebernehmen = () => {
+      if (laufenderTitel) abschnitte.set(laufenderTitel.toLowerCase(), puffer.join('\n').trim());
+    };
+    for (const zeile of content.split('\n')) {
+      const treffer = /^##\s+(.*)$/.exec(zeile);
+      if (treffer) {
+        uebernehmen();
+        laufenderTitel = treffer[1].trim();
+        puffer = [];
+        continue;
+      }
+      if (laufenderTitel) puffer.push(zeile);
+    }
+    uebernehmen();
+    const abschnitt = (titel: string): string => {
+      const gesucht = titel.toLowerCase();
+      const genau = abschnitte.get(gesucht);
+      if (genau) return genau;
+      for (const [name, inhalt] of abschnitte) if (name.startsWith(gesucht) && inhalt) return inhalt;
+      return '';
+    };
+
+    const ueberschrift = /^#\s*Gelernt:\s*(.*)$/m.exec(content)?.[1]?.trim() ?? '';
+    const frage = abschnitt('Frage') || ueberschrift;
+    let antwort = abschnitt('Gelernte Antwort');
+    if (!antwort) {
+      // Von Hand gekürzte Notiz: alles unterhalb der Überschrift ist die Antwort.
+      const ohneKopf = content.replace(/^---\n[\s\S]*?\n---\n?/, '');
+      antwort = abschnitt('Frage') || abschnitt('Deine Korrektur')
+        ? ''
+        : ohneKopf
+            .split('\n')
+            .filter((zeile) => !/^#\s*Gelernt:/.test(zeile) && !/^>\s/.test(zeile) && !/^---\s*$/.test(zeile))
+            .join('\n')
+            .trim();
+    }
+    if (!antwort) return null;
+
+    const korrektur = abschnitt('Deine Korrektur (verbindlich)') || undefined;
+    const quellenText = abschnitt('Notizquellen');
+    const sources: Lesson['sources'] = [];
+    for (const zeile of quellenText.split('\n')) {
+      const treffer = /^\s*-\s*\[\[([^\]]+)\]\](?:\s*›\s*(.*))?/.exec(zeile);
+      if (!treffer) continue;
+      const pfad = treffer[1].split('|')[0].trim();
+      if (!pfad) continue;
+      const heading = treffer[2]?.trim();
+      sources.push(heading ? { path: pfad, heading } : { path: pfad });
+    }
+
+    const modell = feld('jarvis-modell');
+    const [provider, ...rest] = modell.split('/');
+    const grund = feld('jarvis-grund');
+    const bewertung = feld('jarvis-bewertung');
+    const erstellt = Date.parse(feld('erstellt'));
+    const gruende = ['escalation', 'upgrade', 'manual', 'correction'] as const;
+    const bewertungen = ['auto', 'good', 'bad'] as const;
+    return {
+      id: feld('jarvis-id') || `n${kurzeKennung(path)}`,
+      createdAt: Number.isFinite(erstellt) ? erstellt : Date.now(),
+      question: frage || '(Frage nicht mehr lesbar)',
+      answer: antwort,
+      provider: provider || 'unbekannt',
+      model: rest.join('/') || 'unbekannt',
+      reason: gruende.includes(grund as (typeof gruende)[number]) ? (grund as Lesson['reason']) : 'manual',
+      sources,
+      terms: [],
+      rating: bewertungen.includes(bewertung as (typeof bewertungen)[number])
+        ? (bewertung as Lesson['rating'])
+        : 'auto',
+      correction: korrektur,
+      usedCount: 0,
+      lastUsedAt: 0,
+    };
+  }
+
+  /** Alle Notizen im Gedächtnisordner einlesen und in Lektionen übersetzen. */
+  async importAll(): Promise<Lesson[]> {
+    const folder = this.folder();
+    const dateien = await this.fs.list(folder);
+    const lektionen: Lesson[] = [];
+    for (const path of dateien) {
+      if (!/\.md$/i.test(path)) continue;
+      try {
+        const content = await this.fs.read(path);
+        if (!content) continue;
+        const lesson = this.parse(path, content);
+        if (lesson) lektionen.push(lesson);
+      } catch {
+        // Eine unlesbare Notiz darf die Wiederherstellung nicht stoppen.
+      }
+    }
+    return lektionen.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
   /** Prüfen, ob ein Pfad im Gedächtnisordner liegt (diese Notizen werden nicht doppelt durchsucht). */
   isMemoryPath(path: string): boolean {
     const folder = this.folder();
     return path === folder || path.startsWith(`${folder}/`);
   }
+}
+
+/** Kleine, stabile Kennung aus einem Pfad (falls eine Notiz kein jarvis-id hat). */
+function kurzeKennung(text: string): string {
+  let wert = 7;
+  for (let i = 0; i < text.length; i++) wert = (wert * 31 + text.charCodeAt(i)) % 0xffffffff;
+  return wert.toString(36);
 }
 
 function pad(value: number): string {
