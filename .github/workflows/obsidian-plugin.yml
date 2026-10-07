@@ -75,17 +75,36 @@ jobs:
         working-directory: obsidian-jarvis
       - run: npm run build
         working-directory: obsidian-jarvis
+      - name: Installationspaket (ZIP) schnüren
+        working-directory: obsidian-jarvis
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          mkdir -p paket
+          cp main.js manifest.json styles.css paket/
+          (cd paket && zip -q -r "../obsidian-jarvis-${VERSION}.zip" .)
+          ls -l obsidian-jarvis-*.zip
       - name: Release mit Plugin-Dateien anlegen
         uses: softprops/action-gh-release@v2
         with:
           name: Jarvis AI für Obsidian ${{ github.ref_name }}
           body: |
-            Automatisch gebaut aus dem Stand dieses Tags.
+            Fertiges Obsidian-Paket **Jarvis AI (lokal + Top-Cloud)** — automatisch gebaut und getestet aus diesem Tag.
 
-            **Installation über BRAT:** BRAT → „Add a beta plugin for testing" → `${{ github.repository }}`
+            ### Installation über BRAT (empfohlen)
+            1. Community-Plug-in **BRAT** installieren (Einstellungen → Community-Plugins → Durchsuchen → BRAT).
+            2. `Strg/Cmd+P` → **BRAT: Add a beta plugin for testing** → `${{ github.repository }}` → bestätigen.
+            3. Einstellungen → Community-Plugins → **Jarvis AI** aktivieren.
+            4. `Strg/Cmd+P` → **Jarvis: Chat öffnen**.
 
-            **Oder von Hand:** `main.js`, `manifest.json`, `styles.css` herunterladen und in
-            `.obsidian/plugins/jarvis-ai/` kopieren.
+            ### Installation von Hand
+            `main.js`, `manifest.json` und `styles.css` herunterladen und in
+            `.obsidian/plugins/jarvis-ai/` des Vaults kopieren, Obsidian neu laden, Plug-in aktivieren.
+
+            ### Enthalten
+            - 🏠 lokal über Ollama · ⚡ Auto mit automatischem Ausweichen · ☁️ Cloud (Claude Opus 5.5, GPT-6 Astra, Gemini 3.8 Flash, OpenRouter)
+            - Fragen an den Vault mit Quellenangaben, private Notizen bleiben unberührt
+            - GitHub-Sicherung des Vaults mit Vorschau und Wiederherstellung
+            - Vor jedem Release: Typprüfung und 63 automatische Tests in der CI
           files: |
             obsidian-jarvis/main.js
             obsidian-jarvis/manifest.json
