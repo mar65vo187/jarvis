@@ -6,13 +6,20 @@ Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antwor
 er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
 ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
+**Neu in 2.1.0 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
+Seiten, liest und schreibt Notizen, rechnet, liest Dateien, führt auf dem Desktop Befehle
+aus, liest Dateien und Aufgaben aus deinem GitHub-Repository, findet Modelle auf
+HuggingFace, löst n8n-Workflows aus und bindet fremde MCP-Server an. Zwei neue Modi
+kommen dazu: **Maximum** (immer die stärksten Modelle, mit Prüflauf) und **Orakel**
+(mehrere Top-Modelle prüfen eine Antwort, die beste Fassung gewinnt).
+
 | | |
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.0.1 |
+| **Version** | 2.1.0 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 96 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 155 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -124,10 +131,51 @@ permanent in sich, auch ohne dass Lektionen in den Prompt passen müssen.
 - **Private Notizen** (`ki-privat: true`) und ausgeschlossene Ordner werden nie gelesen.
 - **Kostenschätzung** pro Cloud-Antwort (grob, ohne Gewähr) und Tokenzahlen.
 - **GitHub**: Vault als echte Commits sichern, mit Vorschau wiederherstellen.
+- **Werkzeuge**: Internet, GitHub, HuggingFace, n8n, Rechner, Dateien, MCP (Abschnitt 4).
 
 ---
 
-## 4. Installation
+## 4. Werkzeuge — Jarvis handeln lassen
+
+Jarvis kann nicht nur antworten, sondern **etwas tun**. Jedes Werkzeug ist einzeln
+freigeschaltet, alles Schreibende und Ausführende ist standardmäßig **aus**. Zu sehen ist
+jeder Schritt in der Antwort (Schalter „Werkzeugschritte anzeigen").
+
+| Werkzeug | Was es tut | Freigabe |
+|---|---|---|
+| `vault_search`, `vault_read`, `vault_list` | Notizen durchsuchen, lesen, auflisten | immer |
+| `vault_write`, `vault_append` | Notizen anlegen und ergänzen | „Notizen anlegen und ändern" |
+| `web_search` | Internetsuche (Tavily, Brave, SearXNG, DuckDuckGo) | „Internet" |
+| `web_read` | Internetseite lesen und in Text wandeln | „Internet" |
+| `calculate` | Rechnen (Punkt vor Strich, Klammern, `%`, `^`, deutsche Zahlen wie `1.000,50`) | immer |
+| `run_command` | Programme starten (git, npm, Skripte) — **nur Desktop**, mit Sperrliste | „Befehle auf dem Rechner" |
+| `read_file`, `write_file` | Dateien außerhalb des Vaults — **nur Desktop** | „Dateien" |
+| `github_file`, `github_tree`, `github_search`, `github_issues` | Dateien im verbundenen Repository lesen, Baum ansehen, in Code suchen, Aufgaben lesen | GitHub-Anbindung |
+| `github_write` | Datei im Repository ändern (mit Commit) | „GitHub: Dateien schreiben" |
+| `hf_search`, `hf_info` | Modelle, Datensätze und Apps auf HuggingFace finden und prüfen | immer (Schlüssel optional) |
+| `n8n_run` | n8n-Workflow über Webhook auslösen | „n8n-Webhook" |
+| `mcp_<server>_<werkzeug>` | Werkzeuge fremder MCP-Server (Dateien, Browser, Datenbanken …) | „MCP" |
+
+**So läuft ein Werkzeugeinsatz ab:** Jarvis bekommt die Werkzeugliste in seine
+Anweisung, antwortet in einer Runde mit einem Werkzeugblock, das Plugin führt ihn
+wirklich aus, das Ergebnis geht zurück ins Modell — und erst dann entsteht die Antwort.
+Falsche oder erfundene Werkzeugnamen werden erkannt und korrigiert, statt still zu
+scheitern. Nach `maxSteps` Runden (Standard 4) bricht die Schleife ab und sagt es dir.
+
+### Die zwei neuen Modi
+
+| Modus | Was passiert |
+|---|---|
+| ⚡ **Maximum** | Immer das stärkste verfügbare Cloud-Modell, Werkzeuge dürfen ran, und am Ende prüft Jarvis seine eigene Antwort noch einmal. Für schwere Aufgaben. |
+| 🔮 **Orakel** | Ein Top-Modell schreibt, **andere** Top-Modelle prüfen (Fehler, Lücken, Risiken), das erste Modell schreibt daraus die geprüfte Endfassung. Du siehst „🔮 von mehreren Modellen geprüft". |
+
+Ein Selbsttest in den Einstellungen („Werkzeuge testen") ruft die Werkzeuge **wirklich**
+auf (Rechnen, Vault, Internet, GitHub, HuggingFace, n8n, MCP) und zeigt dir, was
+funktioniert.
+
+---
+
+## 5. Installation
 
 ### Weg A — über GitHub (empfohlen, mit Updates)
 
@@ -150,7 +198,7 @@ Danach: `Strg/Cmd+P` → **„Jarvis: Chat öffnen"**.
 
 ---
 
-## 5. Einrichtung: lokal (Ollama)
+## 6. Einrichtung: lokal (Ollama)
 
 1. [Ollama](https://ollama.com/download) installieren und starten.
 2. Modell wählen (nach Speicher):
@@ -172,7 +220,7 @@ Danach: `Strg/Cmd+P` → **„Jarvis: Chat öffnen"**.
 
 ---
 
-## 6. Einrichtung: Cloud (Top-Modelle)
+## 7. Einrichtung: Cloud (Top-Modelle)
 
 **Aktiv** einschalten, **API-Schlüssel** einfügen, fertig. Schlüssel liegen im
 Schlüsseltresor von Obsidian (ab 1.11), nicht im Vault.
@@ -185,7 +233,14 @@ Schlüsseltresor von Obsidian (ab 1.11), nicht im Vault.
 | | `gpt-6-luna` | | günstig, für viel Text |
 | **Gemini** | `gemini-3.8-flash` | aistudio.google.com | sehr schnell, Gratis-Kontingent |
 | **OpenRouter** | `anthropic/claude-opus-5-5` u. a. | openrouter.ai/keys | ein Schlüssel, fast alle Modelle |
+| **HuggingFace** | z. B. `Qwen/Qwen3-8B` | huggingface.co/settings/tokens | Inference-Router: ein Schlüssel, sehr viele offene Modelle |
+| **n8n** | `jarvis` | — | eigener Workflow als Modellantwort (`/v1/chat/completions`) |
 | **Eigener Dienst** | z. B. `llama3.1:8b` | — | alles mit `/v1/chat/completions` (LM Studio, vLLM, Groq, DeepSeek) |
+
+Bei jedem Cloud-Anbieter gibt es zusätzlich **„Nachdenken"** (Denk-Stufe: aus, wenig,
+mittel, hoch, maximal). Ist sie eingeschaltet, bekommt das Modell die passenden Felder
+(`reasoning_effort`, `thinking`, `generationConfig`); scheitert der Aufruf damit, wiederholt
+Jarvis die Anfrage automatisch ohne diese Felder.
 
 Mit **„Modelle laden"** holt Jarvis die echte Liste deines Kontos.
 Für Dauerbetrieb ist `⚡ Auto` ideal: Alltag lokal, Cloud nur wenn nötig — **und genau
@@ -193,7 +248,7 @@ diese Cloud-Antworten machen deine lokale KI besser.**
 
 ---
 
-## 7. Bedienung
+## 8. Bedienung
 
 **Befehls-Palette** (`Strg/Cmd+P`):
 
@@ -222,7 +277,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ---
 
-## 8. GitHub-Anbindung
+## 9. GitHub-Anbindung
 
 ### Einmal einrichten
 
@@ -246,7 +301,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ---
 
-## 9. Datenschutz und Daten
+## 10. Datenschutz und Daten
 
 - **Lokal-Modus**: alles bleibt auf `127.0.0.1` (Ollama).
 - **Cloud-Modus**: übertragen werden nur die Nachricht, die ausgewählten Notiz-Ausschnitte
@@ -260,7 +315,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ---
 
-## 10. Wenn etwas nicht klappt
+## 11. Wenn etwas nicht klappt
 
 | Symptom | Lösung |
 |---|---|
@@ -279,7 +334,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ---
 
-## 11. Grenzen (ehrlich)
+## 12. Grenzen (ehrlich)
 
 - **Kein Trainieren von Modellgewichten.** Das Lernen sind gespeicherte Antworten,
   Regeln und Beispiel-Dialoge im Modellprofil. Ein kleines lokales Modell bleibt dadurch
@@ -288,19 +343,22 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
   zuverlässig fehlende Kernaussagen und Ausweich-Floskeln, aber keine inhaltlichen Fehler
   in schöner Formulierung. Deshalb gibt es Bewerten und Korrigieren.
 - Nur Markdown-Notizen werden gelesen (keine PDFs/Bilder).
-- Kein Internet-Zugriff für das Modell, keine Kalender-/Mail-Aktionen, kein Arbeiten bei
-  geschlossenem Obsidian.
-- GitHub ist eine Sicherung, kein Live-Sync.
+- Werkzeuge, die auf Programme oder Dateien außerhalb des Vaults zugreifen, laufen nur
+  auf dem Desktop (wie Obsidian selbst); auf dem Tablet bleiben Internet-, GitHub-,
+  HuggingFace-, n8n- und Vault-Werkzeuge verfügbar.
+- Kein Arbeiten bei geschlossenem Obsidian, keine Kalender-/Mail-Aktionen von sich aus
+  (n8n-Workflows können das übernehmen).
+- GitHub ist eine Sicherung und ein Werkzeug, kein Live-Sync in Echtzeit.
 
 ---
 
-## 12. Für Entwickler
+## 13. Für Entwickler
 
 ```bash
 cd obsidian-jarvis
 npm ci
 npm run typecheck   # TypeScript strict
-npm test            # 92 Tests; baut vorher automatisch das Bündel
+npm test            # 155 Tests; baut vorher automatisch das Bündel
 npm run build       # erzeugt main.js
 ```
 
@@ -309,7 +367,10 @@ src/
   main.ts                Plugin-Einstieg, Befehle, GitHub-Automatik, Destillation, Diagnose
   brain.ts               Modellwahl, Presets, automatisches Ausweichen
   settings.ts            Einstellungen + Oberfläche
-  providers/             ollama | openai-compat | anthropic | gemini
+  providers/             ollama | openai-compat | anthropic | gemini (mit Denk-Stufen)
+  tools/                 types | protocol (Werkzeugblöcke) | agent (Schleife) | registry
+                         (Vault, Rechner, Shell, Dateien) | web (Suche/Seiten lesen) |
+                         dienste (GitHub, HuggingFace, n8n) | mcp (fremde Werkzeuge)
   rag/                   vault-index.ts (Suche), prompt.ts (Prompts inkl. Lektionen)
   learn/                 types.ts, quality.ts (Messung), store.ts (Lernspeicher),
                          distill.ts (Ollama-Profil), notes.ts (Markdown im Vault)
@@ -317,7 +378,8 @@ src/
   github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
   obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
-tests/                   96 Tests in 8 Dateien inkl. Ende-zu-Ende-Test auf main.js
+tests/                   155 Tests in 9 Dateien inkl. Ende-zu-Ende-Tests auf main.js
+                         (Werkzeuge, Internet, GitHub, HuggingFace, n8n)
 ```
 
 Beitragen: bitte `npm run typecheck && npm test` grün halten.
@@ -330,7 +392,7 @@ im Manifest, Ladbarkeit des Bündels):
 
 ```bash
 node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
-node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.0.0 --streng
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.0 --streng
 ```
 
 Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den

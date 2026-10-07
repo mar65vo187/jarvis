@@ -84,8 +84,15 @@ export class GeminiProvider implements Provider {
       systemInstruction: { parts: [{ text: request.system }] },
     };
     const generationConfig: Record<string, unknown> = {};
-    if (request.temperature !== undefined) generationConfig.temperature = request.temperature;
+    if (request.temperature !== undefined && request.temperature >= 0) generationConfig.temperature = request.temperature;
     if (request.maxTokens && request.maxTokens > 0) generationConfig.maxOutputTokens = request.maxTokens;
+    if (request.extraParams) {
+      // Gemini erwartet Denk-Einstellungen innerhalb von generationConfig.
+      for (const [schluessel, wert] of Object.entries(request.extraParams)) {
+        if (wert === undefined || wert === null) continue;
+        generationConfig[schluessel] = wert;
+      }
+    }
     if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
 
     let text = '';

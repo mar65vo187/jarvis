@@ -93,6 +93,12 @@ export class OllamaProvider implements Provider {
         temperature: request.temperature ?? opts.temperature,
       },
     };
+    if (request.extraParams) {
+      for (const [schluessel, wert] of Object.entries(request.extraParams)) {
+        if (wert === undefined || wert === null) continue;
+        (body.options as Record<string, unknown>)[schluessel] = wert;
+      }
+    }
 
     let text = '';
     let streamed = false;

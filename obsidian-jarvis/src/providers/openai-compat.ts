@@ -38,6 +38,8 @@ export interface OpenAiCompatOptions {
   sendUsageOption?: boolean;
   /** Bei OpenAI direkt heißt das Limit max_completion_tokens. */
   useMaxCompletionTokens?: boolean;
+  /** Wie Zusatzfelder fürs Nachdenken heißen (Standard: openai). */
+  reasoningStyle?: 'openai' | 'openrouter' | 'none';
 }
 
 export class OpenAiCompatProvider implements Provider {
@@ -88,12 +90,14 @@ export class OpenAiCompatProvider implements Provider {
         ...request.messages.map((m) => ({ role: m.role, content: m.content })),
       ],
     };
-    if (request.temperature !== undefined) body.temperature = request.temperature;
+    // -1 bedeutet „nichts senden" (Top-Modelle haben eigene Vorgaben).
+    if (request.temperature !== undefined && request.temperature >= 0) body.temperature = request.temperature;
     if (request.maxTokens && request.maxTokens > 0) {
       if (this.options.useMaxCompletionTokens) body.max_completion_tokens = request.maxTokens;
       else body.max_tokens = request.maxTokens;
     }
     if (this.options.sendUsageOption) body.stream_options = { include_usage: true };
+    applyExtraParams(body, request.extraParams);
 
     let text = '';
     let usage: { inputTokens?: number; outputTokens?: number } | undefined;
@@ -211,5 +215,17 @@ export class OpenAiCompatProvider implements Provider {
       retries: 0,
     });
     return json.choices?.[0]?.message?.content ?? '';
+  }
+}
+
+/**
+ * Zusatzfelder (z. B. Denk-Stufen) in die Anfrage eintragen. Der Name bleibt so,
+ * wie ihn der Anbieter erwartet — die Umrechnung passiert im Gehirn.
+ */
+export function applyExtraParams(body: Record<string, unknown>, extra?: Record<string, unknown>): void {
+  if (!extra) return;
+  for (const [schluessel, wert] of Object.entries(extra)) {
+    if (wert === undefined || wert === null) continue;
+    body[schluessel] = wert;
   }
 }

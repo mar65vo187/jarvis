@@ -7,7 +7,7 @@ import { CLOUD_ORDER_LABELS } from './brain';
 export const DEFAULT_SETTINGS: JarvisSettings = {
   routeMode: 'auto',
   autoEscalate: true,
-  autoOrder: ['anthropic', 'openai', 'gemini', 'openrouter', 'custom'],
+  autoOrder: ['anthropic', 'openai', 'gemini', 'openrouter', 'huggingface', 'n8n', 'custom'],
   local: {
     baseUrl: 'http://127.0.0.1:11434',
     defaultModel: '',
@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
   cloud: {
     anthropic: {
       enabled: false,
+      thinkingLevel: 'off',
       kind: 'anthropic',
       label: 'Claude (Anthropic)',
       baseUrl: 'https://api.anthropic.com',
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     },
     openai: {
       enabled: false,
+      thinkingLevel: 'off',
       kind: 'openai',
       label: 'GPT (OpenAI)',
       baseUrl: 'https://api.openai.com/v1',
@@ -41,6 +43,7 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     },
     gemini: {
       enabled: false,
+      thinkingLevel: 'off',
       kind: 'gemini',
       label: 'Gemini (Google)',
       baseUrl: 'https://generativelanguage.googleapis.com',
@@ -51,6 +54,7 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     },
     openrouter: {
       enabled: false,
+      thinkingLevel: 'off',
       kind: 'openai',
       label: 'OpenRouter (alle Modelle)',
       baseUrl: 'https://openrouter.ai/api/v1',
@@ -59,8 +63,31 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
       temperature: -1,
       maxTokens: 0,
     },
+    huggingface: {
+      enabled: false,
+      thinkingLevel: 'off',
+      kind: 'openai',
+      label: 'Hugging Face (Router)',
+      baseUrl: 'https://router.huggingface.co/v1',
+      defaultModel: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
+      models: [],
+      temperature: -1,
+      maxTokens: 0,
+    },
+    n8n: {
+      enabled: false,
+      thinkingLevel: 'off',
+      kind: 'openai',
+      label: 'n8n (eigener Arbeitsablauf)',
+      baseUrl: 'http://127.0.0.1:5678/webhook/jarvis',
+      defaultModel: 'jarvis',
+      models: [],
+      temperature: -1,
+      maxTokens: 0,
+    },
     custom: {
       enabled: false,
+      thinkingLevel: 'off',
       kind: 'openai',
       label: 'Eigener Dienst (OpenAI-kompatibel)',
       baseUrl: 'http://127.0.0.1:1234/v1',
@@ -97,6 +124,28 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     lastDistillAt: '',
     lastDistillModel: '',
     qualityHistory: [],
+  },
+  tools: {
+    enabled: true,
+    mode: 'auto',
+    effort: 'normal',
+    maxSteps: 4,
+    allowInternet: false,
+    searchProvider: 'duckduckgo',
+    searchApiKey: '',
+    searchBaseUrl: '',
+    allowVaultWrite: false,
+    allowShell: false,
+    allowFiles: false,
+    allowMcp: false,
+    allowGithubWrite: false,
+    githubApiBase: '',
+    hfBaseUrl: '',
+    n8nWebhookUrl: '',
+    mcpServers: [],
+    commandTimeoutSeconds: 60,
+    shellBlocklist: [],
+    showSteps: true,
   },
   github: {
     enabled: false,
@@ -143,6 +192,7 @@ export function mergeSettings(loaded: DeepPartial<JarvisSettings> | null | undef
     local: { ...base.local, ...(loaded.local ?? {}) },
     rag: { ...base.rag, ...(loaded.rag ?? {}) },
     learning: { ...base.learning, ...(loaded.learning ?? {}) },
+    tools: { ...base.tools, ...(loaded.tools ?? {}) },
     github: { ...base.github, ...(loaded.github ?? {}) },
     ui: { ...base.ui, ...(loaded.ui ?? {}) },
     cloud: { ...base.cloud },
@@ -150,6 +200,20 @@ export function mergeSettings(loaded: DeepPartial<JarvisSettings> | null | undef
   for (const id of Object.keys(base.cloud) as CloudProviderId[]) {
     merged.cloud[id] = { ...base.cloud[id], ...(loaded.cloud?.[id] ?? {}) };
   }
+  // MCP-Server: fehlende Felder einzelner Einträge ergänzen, Einträge ohne Namen verwerfen.
+  merged.tools.mcpServers = (merged.tools.mcpServers ?? [])
+    .filter((eintrag) => eintrag && typeof eintrag.name === 'string' && eintrag.name.trim())
+    .map((eintrag) => ({
+      name: eintrag.name.trim(),
+      enabled: eintrag.enabled !== false,
+      transport: eintrag.transport === 'stdio' ? 'stdio' : 'http',
+      url: eintrag.url ?? '',
+      command: eintrag.command ?? '',
+      args: Array.isArray(eintrag.args) ? eintrag.args.map((wert) => String(wert)) : [],
+      headers: eintrag.headers && typeof eintrag.headers === 'object' ? eintrag.headers : {},
+      env: eintrag.env && typeof eintrag.env === 'object' ? eintrag.env : {},
+      timeoutSeconds: Number.isFinite(Number(eintrag.timeoutSeconds)) ? Math.max(5, Number(eintrag.timeoutSeconds)) : 30,
+    }));
   return merged;
 }
 
@@ -171,6 +235,10 @@ export interface SettingsHost {
   testEverything(): Promise<string[]>;
   indexStats(): { files: number; chunks: number; embedded: number; embeddingModel: string | null };
   resetIndex(): Promise<void>;
+  /** Werkzeuge */
+  testTools(): Promise<string[]>;
+  mcpStatus(force?: boolean): Promise<Array<{ name: string; ok: boolean; info: string; tools: string[] }>>;
+  closeTools(): void;
   /** Lernsystem */
   learningReport(): string[];
   distillNow(): Promise<string>;
@@ -196,6 +264,7 @@ export class JarvisSettingTab extends PluginSettingTab {
     this.renderCloud(containerEl);
     this.renderVault(containerEl);
     this.renderLearning(containerEl);
+    this.renderTools(containerEl);
     this.renderGithub(containerEl);
     this.renderBehaviour(containerEl);
     this.renderDiagnose(containerEl);
@@ -389,6 +458,20 @@ export class JarvisSettingTab extends PluginSettingTab {
         keyHint: 'sk-or-…',
       },
       {
+        id: 'huggingface',
+        hint:
+          'Offene Spitzenmodelle über den Hugging-Face-Router (Qwen3 235B, Kimi K2, DeepSeek, GLM …). ' +
+          'Schlüssel: huggingface.co/settings/tokens (Recht „Make calls to Inference Providers")',
+        keyHint: 'hf_…',
+      },
+      {
+        id: 'n8n',
+        hint:
+          'Dein eigener n8n-Arbeitsablauf als Modell: Jarvis schickt die Anfrage an einen Webhook und bekommt die Antwort. ' +
+          'So kann Jarvis alles auslösen, was n8n kann (Mails, Kalender, Datenbanken, Dienste). Adresse: http://127.0.0.1:5678/webhook/jarvis',
+        keyHint: 'optionaler geheimer Schlüssel',
+      },
+      {
         id: 'custom',
         hint: 'Jeder Dienst, der wie OpenAI antwortet (LM Studio, vLLM, Groq, DeepSeek, Mistral …).',
         keyHint: 'Schlüssel oder leer',
@@ -465,11 +548,403 @@ export class JarvisSettingTab extends PluginSettingTab {
           }),
         );
 
+      new Setting(containerEl)
+        .setName('Nachdenken')
+        .setDesc(
+          'Wie gründlich das Modell rechnen soll. „aus" sendet nichts Zusätzliches (immer sicher). ' +
+            'Höhere Stufen kosten mehr Zeit und Geld, sind aber bei schwierigen Aufgaben genauer. ' +
+            'Kann eine Schnittstelle das Feld nicht, wird die Anfrage automatisch ohne es wiederholt.',
+        )
+        .addDropdown((dropdown) => {
+          const stufen: Array<{ id: 'off' | 'low' | 'medium' | 'high'; label: string }> = [
+            { id: 'off', label: 'aus (Standard)' },
+            { id: 'low', label: 'wenig' },
+            { id: 'medium', label: 'mittel' },
+            { id: 'high', label: 'viel (Maximum)' },
+          ];
+          for (const stufe of stufen) dropdown.addOption(stufe.id, stufe.label);
+          dropdown.setValue(cloud.thinkingLevel ?? 'off').onChange(async (value) => {
+            cloud.thinkingLevel = value as 'off' | 'low' | 'medium' | 'high';
+            await this.save();
+          });
+          return dropdown;
+        });
+
       if (cloud.models.length) {
         const list = containerEl.createEl('p', { cls: 'setting-item-description' });
         list.setText(`Bekannte Modelle: ${cloud.models.slice(0, 12).join(', ')}${cloud.models.length > 12 ? ' …' : ''}`);
       }
     }
+  }
+
+  // ------------------------------------------------------------- Werkzeuge
+
+  private renderTools(containerEl: HTMLElement): void {
+    containerEl.createEl('h3', { text: 'Werkzeuge — Jarvis handeln lassen' });
+    containerEl.createEl('p', {
+      cls: 'setting-item-description',
+      text:
+        'Werkzeuge machen Jarvis stärker: Internet durchsuchen, Seiten lesen, Notizen lesen und schreiben, rechnen, ' +
+        'Befehle auf dem Rechner ausführen und fremde MCP-Werkzeuge benutzen. Alles ist freiwillig — ' +
+        'was du nicht einschaltest, kann Jarvis nicht.',
+    });
+    const tools = this.host.settings.tools;
+
+    new Setting(containerEl)
+      .setName('Werkzeuge benutzen')
+      .setDesc('Hauptschalter. Ohne diesen antwortet Jarvis wie bisher nur aus Wissen und Notizen.')
+      .addToggle((toggle) =>
+        toggle.setValue(tools.enabled).onChange(async (value) => {
+          tools.enabled = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Wann benutzen?')
+      .setDesc('„Bei Bedarf" ist sparsam und schnell; „immer" gibt dem Modell jedes Mal die volle Werkzeugliste.')
+      .addDropdown((dropdown) => {
+        dropdown.addOption('auto', 'Bei Bedarf (empfohlen)');
+        dropdown.addOption('always', 'Immer anbieten');
+        dropdown.addOption('off', 'Nie');
+        dropdown.setValue(tools.mode).onChange(async (value) => {
+          tools.mode = value as 'off' | 'auto' | 'always';
+          await this.save();
+        });
+        return dropdown;
+      });
+
+    new Setting(containerEl)
+      .setName('Arbeitsweise')
+      .setDesc(
+        '„Maximal" arbeitet gründlicher: mehr Werkzeugrunden und am Ende eine Selbstprüfung gegen die Werkzeug-Ergebnisse. ' +
+          'Etwas langsamer, aber deutlich genauer.',
+      )
+      .addDropdown((dropdown) => {
+        dropdown.addOption('normal', 'Ausgewogen');
+        dropdown.addOption('max', 'Maximal (mehrfach prüfen)');
+        dropdown.setValue(tools.effort).onChange(async (value) => {
+          tools.effort = value as 'normal' | 'max';
+          await this.save();
+        });
+        return dropdown;
+      });
+
+    new Setting(containerEl)
+      .setName('Höchstzahl Werkzeugschritte')
+      .setDesc('Schutz vor Endlosschleifen. 4 ist ein guter Wert, 8 für komplizierte Recherchen.')
+      .addSlider((slider) =>
+        slider
+          .setLimits(1, 12, 1)
+          .setValue(tools.maxSteps)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            tools.maxSteps = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Internet')
+      .setDesc('Jarvis darf suchen und Seiten lesen. Die Inhalte gehen an das gewählte Modell (auch in die Cloud).')
+      .addToggle((toggle) =>
+        toggle.setValue(tools.allowInternet).onChange(async (value) => {
+          tools.allowInternet = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Suchdienst')
+      .setDesc(
+        'DuckDuckGo braucht keinen Schlüssel. Tavily und Brave sind zuverlässiger (kostenlose Kontingente). ' +
+          'SearXNG: Adresse deiner eigenen Instanz — dort muss die JSON-Ausgabe eingeschaltet sein.',
+      )
+      .addDropdown((dropdown) => {
+        dropdown.addOption('duckduckgo', 'DuckDuckGo (ohne Schlüssel)');
+        dropdown.addOption('tavily', 'Tavily');
+        dropdown.addOption('brave', 'Brave Search');
+        dropdown.addOption('searxng', 'SearXNG (eigene Instanz)');
+        dropdown.setValue(tools.searchProvider).onChange(async (value) => {
+          tools.searchProvider = value as typeof tools.searchProvider;
+          await this.save();
+        });
+        return dropdown;
+      });
+
+    new Setting(containerEl)
+      .setName('Schlüssel des Suchdienstes')
+      .setDesc(`Aktuell: ${this.maskKey(tools.searchApiKey)}`)
+      .addText((text) => {
+        text.inputEl.type = 'password';
+        text.setPlaceholder('leer lassen bei DuckDuckGo');
+        text.onChange(async (value) => {
+          tools.searchApiKey = value.trim();
+          await this.save();
+        });
+        return text;
+      })
+      .addText((text) =>
+        text
+          .setPlaceholder('Adresse (nur SearXNG), z. B. http://127.0.0.1:8080')
+          .setValue(tools.searchBaseUrl)
+          .onChange(async (value) => {
+            tools.searchBaseUrl = value.trim();
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Notizen anlegen und ändern')
+      .setDesc('Jarvis darf Notizen im Vault schreiben. Jede Änderung wird dir in der Antwort genannt; die GitHub-Sicherung nimmt sie mit.')
+      .addToggle((toggle) =>
+        toggle.setValue(tools.allowVaultWrite).onChange(async (value) => {
+          tools.allowVaultWrite = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Befehle auf dem Rechner')
+      .setDesc(
+        'Nur Desktop. Jarvis darf Programme starten (z. B. git, npm, Skripte). Gefährliche Befehle sind gesperrt. ' +
+          'Gib das nur frei, wenn du es wirklich willst.',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(tools.allowShell).onChange(async (value) => {
+          tools.allowShell = value;
+          await this.save();
+        }),
+      );
+
+    // --- Verbundene Dienste: GitHub, HuggingFace, n8n ---
+    containerEl.createEl('h4', { text: 'Verbundene Dienste (GitHub, HuggingFace, n8n)' });
+    containerEl.createEl('p', {
+      cls: 'setting-item-description',
+      text:
+        'GitHub-Werkzeuge (Dateien lesen, Baum ansehen, suchen, Aufgaben) nutzen das Repository und den Schlüssel aus dem GitHub-Abschnitt. ' +
+        'HuggingFace (Modelle und Datensätze finden) und n8n (Workflows auslösen) sind unten einstellbar.',
+    });
+
+    new Setting(containerEl)
+      .setName('GitHub: Dateien schreiben')
+      .setDesc('Erlaubt Jarvis, Dateien im verbundenen Repository zu ändern (jede Änderung wird commitet). Standardmäßig aus.')
+      .addToggle((toggle) =>
+        toggle.setValue(tools.allowGithubWrite).onChange(async (value) => {
+          tools.allowGithubWrite = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('n8n-Webhook')
+      .setDesc('Adresse des n8n-Webhooks, den Jarvis auslösen darf (z. B. https://n8n.example.com/webhook/jarvis).')
+      .addText((text) =>
+        text
+          .setPlaceholder('https://…/webhook/…')
+          .setValue(tools.n8nWebhookUrl)
+          .onChange(async (value) => {
+            tools.n8nWebhookUrl = value.trim();
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('GitHub-API-Adresse')
+      .setDesc('Leer lassen für https://api.github.com. Für GitHub Enterprise die eigene Adresse eintragen.')
+      .addText((text) =>
+        text
+          .setPlaceholder('https://api.github.com')
+          .setValue(tools.githubApiBase)
+          .onChange(async (value) => {
+            tools.githubApiBase = value.trim();
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('HuggingFace-Adresse')
+      .setDesc('Leer lassen für https://huggingface.co. Für einen eigenen Spiegel die Adresse eintragen.')
+      .addText((text) =>
+        text
+          .setPlaceholder('https://huggingface.co')
+          .setValue(tools.hfBaseUrl)
+          .onChange(async (value) => {
+            tools.hfBaseUrl = value.trim();
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Umgebungstest der Werkzeuge')
+      .setDesc('Prüft die Werkzeuge mit echten Aufrufen (Rechnen, Vault, Internet, MCP).')
+      .addButton((button) =>
+        button.setButtonText('Werkzeuge testen').onClick(async () => {
+          const notice = new Notice('Jarvis prüft die Werkzeuge …', 60_000);
+          try {
+            const zeilen = await this.host.testTools();
+            notice.hide();
+            new ReportModal(this.app, 'Werkzeug-Selbsttest', zeilen).open();
+          } catch (error) {
+            notice.hide();
+            new Notice(`Werkzeugtest fehlgeschlagen: ${(error as Error).message}`, 12000);
+          }
+        }),
+      );
+
+    // --- MCP-Server ---
+    containerEl.createEl('h4', { text: 'MCP-Server (fremde Werkzeuge)' });
+    containerEl.createEl('p', {
+      cls: 'setting-item-description',
+      text:
+        'MCP ist ein offener Standard: Programme bieten darüber Werkzeuge an (Dateien, Browser, Datenbanken, GitHub, n8n …). ' +
+        'Jarvis kann sie benutzen. HTTP läuft auch auf dem Tablet; „Programm" (stdio) nur auf dem Desktop.',
+    });
+
+    tools.mcpServers.forEach((server, index) => {
+      const box = containerEl.createDiv({ cls: 'jarvis-mcp-entry' });
+      box.createEl('h5', { text: `Server ${index + 1}: ${server.name || '(ohne Namen)'}` });
+
+      new Setting(box)
+        .setName('Name')
+        .setDesc('Nur für die Anzeige und die Werkzeugnamen (z. B. files, browser, n8n).')
+        .addText((text) =>
+          text.setValue(server.name).onChange(async (value) => {
+            server.name = value.trim();
+            await this.save();
+          }),
+        );
+
+      new Setting(box)
+        .setName('Aktiv')
+        .addToggle((toggle) =>
+          toggle.setValue(server.enabled).onChange(async (value) => {
+            server.enabled = value;
+            this.host.closeTools();
+            await this.save();
+          }),
+        );
+
+      new Setting(box)
+        .setName('Transport')
+        .setDesc('HTTP = Adresse eines Servers. Programm = lokales Programm, das über stdin/stdout spricht (nur Desktop).')
+        .addDropdown((dropdown) => {
+          dropdown.addOption('http', 'HTTP (Adresse)');
+          dropdown.addOption('stdio', 'Programm (stdio, nur Desktop)');
+          dropdown.setValue(server.transport).onChange(async (value) => {
+            server.transport = value === 'stdio' ? 'stdio' : 'http';
+            await this.save();
+          });
+          return dropdown;
+        });
+
+      new Setting(box)
+        .setName('HTTP-Adresse')
+        .setDesc('z. B. https://mcp.example.com/mcp oder http://127.0.0.1:3000/mcp')
+        .addText((text) =>
+          text.setValue(server.url).onChange(async (value) => {
+            server.url = value.trim();
+            this.host.closeTools();
+            await this.save();
+          }),
+        );
+
+      new Setting(box)
+        .setName('Programm und Argumente')
+        .setDesc('z. B. npx -y @modelcontextprotocol/server-filesystem /pfad/zu/ordner (Argumente mit Leerzeichen trennen)')
+        .addText((text) =>
+          text
+            .setPlaceholder('npx')
+            .setValue(server.command)
+            .onChange(async (value) => {
+              server.command = value.trim();
+              this.host.closeTools();
+              await this.save();
+            }),
+        )
+        .addText((text) =>
+          text
+            .setPlaceholder('-y @modelcontextprotocol/server-filesystem /pfad')
+            .setValue(server.args.join(' '))
+            .onChange(async (value) => {
+              server.args = value.split(/\s+/).map((teil) => teil.trim()).filter(Boolean);
+              this.host.closeTools();
+              await this.save();
+            }),
+        );
+
+      new Setting(box)
+        .setName('Zeitlimit (Sekunden)')
+        .addSlider((slider) =>
+          slider
+            .setLimits(5, 180, 5)
+            .setValue(server.timeoutSeconds)
+            .setDynamicTooltip()
+            .onChange(async (value) => {
+              server.timeoutSeconds = value;
+              await this.save();
+            }),
+        )
+        .addButton((button) =>
+          button.setButtonText('Verbindung testen').onClick(async () => {
+            const notice = new Notice(`Prüfe „${server.name}" …`, 60_000);
+            try {
+              const liste = await this.host.mcpStatus(true);
+              const eigener = liste.find((eintrag) => eintrag.name === server.name) ?? liste[0];
+              notice.hide();
+              if (!eigener) new Notice('Kein MCP-Server eingetragen.', 8000);
+              else if (eigener.ok)
+                new Notice(`„${eigener.name}" ✅ ${eigener.info} — ${eigener.tools.length} Werkzeug(e): ${eigener.tools.slice(0, 8).join(', ')}`, 15000);
+              else new Notice(`„${eigener.name}" ❌ ${eigener.info}`, 15000);
+            } catch (error) {
+              notice.hide();
+              new Notice(`Test fehlgeschlagen: ${(error as Error).message}`, 12000);
+            }
+          }),
+        )
+        .addButton((button) =>
+          button.setButtonText('Entfernen').onClick(async () => {
+            tools.mcpServers = tools.mcpServers.filter((eintrag) => eintrag !== server);
+            this.host.closeTools();
+            await this.save();
+            this.display();
+          }),
+        );
+    });
+
+    new Setting(containerEl)
+      .setName('MCP-Server hinzufügen')
+      .setDesc('Nach dem Hinzufügen Name, Transport und Adresse ausfüllen und „Verbindung testen" drücken.')
+      .addButton((button) =>
+        button.setButtonText('Server hinzufügen').onClick(async () => {
+          tools.mcpServers = [
+            ...tools.mcpServers,
+            {
+              name: `server${tools.mcpServers.length + 1}`,
+              enabled: true,
+              transport: 'http',
+              url: '',
+              command: '',
+              args: [],
+              headers: {},
+              env: {},
+              timeoutSeconds: 30,
+            },
+          ];
+          await this.save();
+          this.display();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Schritte unter der Antwort zeigen')
+      .setDesc('Zeigt, welche Werkzeuge Jarvis benutzt hat — gut zum Nachvollziehen.')
+      .addToggle((toggle) =>
+        toggle.setValue(tools.showSteps).onChange(async (value) => {
+          tools.showSteps = value;
+          await this.save();
+        }),
+      );
   }
 
   private maskKey(key: string): string {

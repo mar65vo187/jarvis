@@ -27,6 +27,7 @@ import { estimateTokens } from './util/format';
  *  die echten, verfügbaren Modelle holt das Plugin direkt beim Anbieter ab. */
 export const PRESET_MODELS: Record<ProviderId, ModelInfo[]> = {
   ollama: [
+    { id: 'gpt-oss:120b', label: 'GPT-OSS 120B', providerId: 'ollama', local: true, note: 'lokal · stärkstes offenes Modell für große Rechner (~65 GB)' },
     { id: 'qwen3.6:27b', label: 'Qwen 3.6 27B', providerId: 'ollama', local: true, note: 'lokal · stärkstes Allround-Profil (~17 GB)' },
     { id: 'qwen3:30b', label: 'Qwen 3 30B (MoE)', providerId: 'ollama', local: true, note: 'lokal · schnell für 30B (~19 GB)' },
     { id: 'qwen3-coder:30b', label: 'Qwen3 Coder 30B', providerId: 'ollama', local: true, note: 'lokal · Code & lange Dokumente' },
@@ -52,6 +53,16 @@ export const PRESET_MODELS: Record<ProviderId, ModelInfo[]> = {
     { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', providerId: 'gemini', local: false, note: 'stark im Schlussfolgern' },
     { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', providerId: 'gemini', local: false, note: 'ausgewogen' },
   ],
+  huggingface: [
+    { id: 'Qwen/Qwen3-235B-A22B-Instruct-2507', label: 'Qwen3 235B (Hugging Face)', providerId: 'huggingface', local: false, note: 'offenes Spitzenmodell' },
+    { id: 'moonshotai/Kimi-K2-Instruct-0905', label: 'Kimi K2 (Hugging Face)', providerId: 'huggingface', local: false, note: 'stark im Schlussfolgern' },
+    { id: 'deepseek-ai/DeepSeek-V3.2-Exp', label: 'DeepSeek V3.2 (Hugging Face)', providerId: 'huggingface', local: false, note: 'günstig und stark' },
+    { id: 'zai-org/GLM-4.6', label: 'GLM-4.6 (Hugging Face)', providerId: 'huggingface', local: false, note: 'guter Allrounder' },
+    { id: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', label: 'Llama 4 Maverick (HF)', providerId: 'huggingface', local: false, note: 'schnell und breit' },
+  ],
+  n8n: [
+    { id: 'jarvis', label: 'n8n-Arbeitsablauf', providerId: 'n8n', local: false, note: 'eigener Ablauf — Jarvis kann dort alles auslösen, was n8n kann' },
+  ],
   openrouter: [
     { id: 'anthropic/claude-opus-5-5', label: 'Claude Opus 5.5 (via OpenRouter)', providerId: 'openrouter', local: false, note: 'Top-Leistung' },
     { id: 'openai/gpt-6-astra', label: 'GPT-6 Astra (via OpenRouter)', providerId: 'openrouter', local: false, note: 'Top-Leistung' },
@@ -67,6 +78,8 @@ export const CLOUD_ORDER_LABELS: Record<CloudProviderId, string> = {
   openai: 'GPT (OpenAI)',
   gemini: 'Gemini (Google)',
   openrouter: 'OpenRouter (alle Modelle)',
+  huggingface: 'Hugging Face (offene Spitzenmodelle)',
+  n8n: 'n8n (eigene Arbeitsabläufe)',
   custom: 'Eigener OpenAI-kompatibler Dienst',
 };
 
@@ -89,6 +102,8 @@ export interface BrainAnswer extends ChatResult {
   /** Log der Versuche, z. B. ["Ollama qwen3:8b", "Claude claude-opus-5-5"]. */
   attempts: { providerId: ProviderId; model: string; error?: string }[];
   escalated: boolean;
+  /** true, wenn andere Modelle die Antwort geprüft haben (Orakel). */
+  deliberated?: boolean;
 }
 
 export interface ProviderStatus {
@@ -154,6 +169,27 @@ export class Brain {
         apiKey: () => this.cloudKey('openai'),
         sendUsageOption: true,
         useMaxCompletionTokens: true,
+        reasoningStyle: 'openai',
+      });
+    } else if (id === 'huggingface') {
+      provider = new OpenAiCompatProvider({
+        id: 'huggingface',
+        label: 'Hugging Face (Router)',
+        baseUrl: () => this.settings().cloud.huggingface.baseUrl,
+        apiKey: () => this.cloudKey('huggingface'),
+        reasoningStyle: 'openai',
+      });
+    } else if (id === 'n8n') {
+      provider = new OpenAiCompatProvider({
+        id: 'n8n',
+        label: 'n8n (eigener Arbeitsablauf)',
+        baseUrl: () => this.settings().cloud.n8n.baseUrl,
+        apiKey: () => this.cloudKey('n8n'),
+        reasoningStyle: 'none',
+        extraHeaders: (): Record<string, string> => {
+          const schluessel = this.cloudKey('n8n').trim();
+          return schluessel ? { 'x-jarvis-key': schluessel } : {};
+        },
       });
     } else {
       provider = new OpenAiCompatProvider({
@@ -161,6 +197,7 @@ export class Brain {
         label: id === 'openrouter' ? 'OpenRouter' : 'Eigener Dienst',
         baseUrl: () => this.settings().cloud[id].baseUrl,
         apiKey: () => this.cloudKey(id),
+        reasoningStyle: id === 'openrouter' ? 'openrouter' : 'openai',
         sendUsageOption: id === 'openrouter',
         extraHeaders:
           id === 'openrouter'
@@ -250,12 +287,12 @@ export class Brain {
     const settings = this.settings();
     const order = settings.autoOrder?.length
       ? settings.autoOrder
-      : (['anthropic', 'openai', 'gemini', 'openrouter', 'custom'] as CloudProviderId[]);
+      : (['anthropic', 'openai', 'gemini', 'openrouter', 'huggingface', 'n8n', 'custom'] as CloudProviderId[]);
     return order.filter((id) => {
       const cloud = settings.cloud[id];
       if (!cloud?.enabled) return false;
       if (!this.cloudKey(id).trim()) return false;
-      if (mode === 'cloud' && !cloud.defaultModel) {
+      if (CLOUD_FIRST_MODES.includes(mode) && !cloud.defaultModel) {
         return PRESET_MODELS[id].length > 0;
       }
       return true;
@@ -287,9 +324,10 @@ export class Brain {
   async run(options: BrainRunOptions): Promise<BrainAnswer> {
     const settings = this.settings();
     const attempts: BrainAnswer['attempts'] = [];
-    const wantsCloud = options.mode === 'cloud';
+    const wantsCloud = CLOUD_FIRST_MODES.includes(options.mode);
     const allowEscalation =
-      options.allowEscalation ?? (settings.autoEscalate && options.mode === 'auto');
+      options.allowEscalation ??
+      ((settings.autoEscalate && options.mode === 'auto') || CLOUD_FIRST_MODES.includes(options.mode));
 
     interface Candidate {
       providerId: ProviderId;
@@ -299,7 +337,7 @@ export class Brain {
 
     const candidates: Candidate[] = [];
 
-    if (options.mode === 'local' || options.mode === 'auto') {
+    if (options.mode === 'local' || options.mode === 'auto' || options.mode === 'max' || options.mode === 'oracle') {
       if (settings.local.baseUrl) {
         candidates.push({
           providerId: 'ollama',
@@ -310,7 +348,7 @@ export class Brain {
     }
 
     const cloudList = this.cloudCandidates(wantsCloud ? 'cloud' : 'auto');
-    if (wantsCloud || allowEscalation || options.mode === 'auto') {
+    if (wantsCloud || allowEscalation || options.mode === 'auto' || options.mode === 'max' || options.mode === 'oracle') {
       for (const id of cloudList) {
         const preferred = belongsTo(options.preferredModel, id) ? options.preferredModel : undefined;
         const model = this.modelFor(id, preferred);
@@ -327,7 +365,7 @@ export class Brain {
       );
     }
 
-    // Im Cloud-Modus: nur die Cloud-Kandidaten verwenden.
+    // Cloud-Modus (auch max/oracle): nur die Cloud-Kandidaten verwenden.
     const list = wantsCloud ? candidates.filter((c) => c.providerId !== 'ollama') : candidates;
     const ordered = wantsCloud
       ? list
@@ -341,26 +379,55 @@ export class Brain {
     for (let index = 0; index < ordered.length; index++) {
       const candidate = ordered[index];
       const provider = this.provider(candidate.providerId);
+      const cloudTemperature = settings.cloud[candidate.providerId as CloudProviderId]?.temperature;
       const temperature =
         candidate.providerId === 'ollama'
           ? options.temperature ?? settings.local.temperature
-          : settings.cloud[candidate.providerId as CloudProviderId]?.temperature;
+          : cloudTemperature !== undefined && cloudTemperature >= 0
+            ? cloudTemperature
+            : undefined;
       const maxTokens =
         candidate.providerId === 'ollama'
           ? options.maxTokens
           : options.maxTokens ?? settings.cloud[candidate.providerId as CloudProviderId]?.maxTokens;
 
+      const extraParams =
+        candidate.providerId === 'ollama'
+          ? undefined
+          : this.thinkingParams(candidate.providerId as CloudProviderId);
+
       try {
-        const result = await provider.chat({
-          model: candidate.model,
-          system: options.system,
-          messages: options.messages,
-          temperature,
-          maxTokens: maxTokens && maxTokens > 0 ? maxTokens : undefined,
-          onDelta: options.onDelta,
-          signal: options.signal,
-          allowStream: this.settings().ui.stream,
-        });
+        let result: ChatResult;
+        try {
+          result = await provider.chat({
+            model: candidate.model,
+            system: options.system,
+            messages: options.messages,
+            temperature,
+            maxTokens: maxTokens && maxTokens > 0 ? maxTokens : undefined,
+            onDelta: options.onDelta,
+            signal: options.signal,
+            allowStream: this.settings().ui.stream,
+            extraParams,
+          });
+        } catch (ersterFehler) {
+          // Manche Schnittstellen kennen die Zusatzfelder nicht: dann ohne sie erneut.
+          const text = String((ersterFehler as Error)?.message ?? '');
+          if (!extraParams || options.signal?.aborted || !/4\d\d|unknown|unsupported|invalid|unrecognized|not permitted/i.test(text)) {
+            throw ersterFehler;
+          }
+          const zurueck = options.onDelta;
+          result = await provider.chat({
+            model: candidate.model,
+            system: options.system,
+            messages: options.messages,
+            temperature,
+            maxTokens: maxTokens && maxTokens > 0 ? maxTokens : undefined,
+            onDelta: zurueck,
+            signal: options.signal,
+            allowStream: this.settings().ui.stream,
+          });
+        }
         attempts.push({ providerId: candidate.providerId, model: candidate.model });
 
         // Unbrauchbare lokale Antwort? -> in der Cloud erneut versuchen.
@@ -381,6 +448,10 @@ export class Brain {
           continue;
         }
 
+        if (options.mode === 'oracle' && !this.synthesizing) {
+          const veredelt = await this.deliberate(options, { ...result, attempts, escalated: escalationHappened }, settings);
+          if (veredelt) return veredelt;
+        }
         return { ...result, attempts, escalated: escalationHappened };
       } catch (error) {
         if (options.signal?.aborted) {
@@ -407,6 +478,142 @@ export class Brain {
     throw error;
   }
 
+  /** Zusatzfelder je Anbieter, damit das Modell gründlicher nachdenkt. */
+  private thinkingParams(id: CloudProviderId): Record<string, unknown> | undefined {
+    const stufe = this.settings().cloud[id]?.thinkingLevel ?? 'off';
+    if (stufe === 'off') return undefined;
+    const budget: Record<string, number> = { low: 2048, medium: 6144, high: 12_288 };
+    if (id === 'anthropic') return { thinking: { type: 'enabled', budget_tokens: budget[stufe] } };
+    if (id === 'gemini') return { thinkingConfig: { thinkingBudget: budget[stufe] } };
+    if (id === 'openrouter') return { reasoning: { effort: stufe } };
+    return { reasoning_effort: stufe };
+  }
+
+  /** Schutz gegen Endlosschleifen bei der Abstimmung. */
+  private synthesizing = false;
+
+  /**
+   * Die Abstimmung („Orakel"): Die erste Antwort wird von weiteren Top-Modellen
+   * geprüft. Deren Einwände und Verbesserungen fließen in eine Endfassung ein,
+   * die das erste Modell schreibt (oder ein anderes, falls es ausfällt).
+   */
+  private async deliberate(
+    options: BrainRunOptions,
+    erste: BrainAnswer,
+    settings: JarvisSettings,
+  ): Promise<BrainAnswer | null> {
+    if (!erste.text.trim() || erste.text.trim().length < 40) return null;
+    // Nur ANDERE Modelle prüfen lassen — das eigene Modell zu fragen bringt nichts Neues.
+    const kandidaten = this.cloudCandidates('cloud')
+      .filter((id) => !(id === erste.providerId && this.modelFor(id) === erste.model))
+      .slice(0, 4);
+    if (!kandidaten.length) return null;
+    const kritiken: Array<{ model: string; providerId: CloudProviderId; text: string }> = [];
+    this.synthesizing = true;
+    try {
+      const laeufe = kandidaten.map(async (id) => {
+        const model = this.modelFor(id);
+        if (!model) return null;
+        const kritikFrage: ChatMessage = {
+          role: 'user',
+          content: [
+            'PRÜFAUFGABE (Abstimmung zwischen mehreren Modellen)',
+            `Aufgabe des Nutzers: ${options.system.includes('Notiz') ? '' : ''}${letzteNutzerfrage(options.messages)}`,
+            '',
+            'Antwortentwurf, der geprüft werden soll:',
+            erste.text,
+            '',
+            'Nenne in höchstens 6 kurzen Punkten:',
+            '1. sachliche Fehler oder erfundene Angaben,',
+            '2. fehlende wichtige Punkte,',
+            '3. riskante oder unklare Formulierungen,',
+            '4. konkrete Verbesserungen.',
+            'Wenn der Entwurf in Ordnung ist, schreibe genau: KEINE EINWÄNDE',
+          ].join('\n'),
+        };
+        const antwort = await this.provider(id).chat({
+          model,
+          system: 'Du bist ein strenger, sachlicher Prüfer. Du erfindest nichts und nennst nur echte Schwächen.',
+          messages: [kritikFrage],
+          temperature: 0,
+          signal: options.signal,
+          allowStream: false,
+        });
+        return { model, providerId: id, text: antwort.text };
+      });
+      const ergebnisse = await Promise.allSettled(laeufe);
+      for (const ergebnis of ergebnisse) {
+        if (ergebnis.status !== 'fulfilled' || !ergebnis.value) continue;
+        const wert = ergebnis.value;
+        if (/KEINE EINWÄNDE/i.test(wert.text) || wert.text.trim().length < 20) continue;
+        kritiken.push(wert);
+      }
+      if (!kritiken.length) {
+        return {
+          ...erste,
+          deliberated: true,
+          attempts: [
+            ...erste.attempts,
+            ...kandidaten.map((id) => ({ providerId: id as ProviderId, model: this.modelFor(id) || '—', error: undefined })),
+          ],
+        };
+      }
+      const sammlung = kritiken
+        .map((kritik) => `Einwände von ${kritik.providerId}/${kritik.model}:\n${kritik.text.slice(0, 3000)}`)
+        .join('\n\n---\n\n');
+      const endfassung = await this.provider(erste.providerId).chat({
+        model: erste.model,
+        system: `${options.system}\n\nDu bekommst Prüfeinwände anderer Modelle. Baue daraus die beste, korrigierte Endfassung für den Nutzer. Erfinde nichts dazu, was nicht belegt ist.`,
+        messages: [
+          ...options.messages,
+          { role: 'assistant', content: erste.text },
+          {
+            role: 'user',
+            content: [
+              'PRÜFEINWÄNDE ANDERER MODELLE',
+              sammlung.slice(0, 12_000),
+              '',
+              'AUFGABE: Liefere jetzt die endgültige, korrigierte Fassung deiner Antwort. Berücksichtige die Einwände,',
+              'die wirklich zutreffen. Sage am Ende in einem kurzen Satz, was sich geändert hat.',
+            ].join('\n'),
+          },
+        ],
+        temperature: options.temperature,
+        signal: options.signal,
+        onDelta: options.onDelta,
+        allowStream: this.settings().ui.stream,
+      });
+      return {
+        ...endfassung,
+        deliberated: true,
+        attempts: [
+          ...erste.attempts,
+          ...kritiken.map((kritik) => ({ providerId: kritik.providerId as ProviderId, model: kritik.model })),
+        ],
+        escalated: true,
+      };
+    } catch {
+      return erste;
+    } finally {
+      this.synthesizing = false;
+    }
+  }
+
+  /**
+   * Eine bereits fertige Antwort von anderen Modellen prüfen und verbessern lassen
+   * (Orakel). Wird vom Assistenten nach einem Werkzeuglauf aufgerufen, damit die
+   * Endfassung geprüft wird statt jeder einzelnen Werkzeugrunde.
+   */
+  async deliberateAnswer(options: BrainRunOptions, answer: BrainAnswer): Promise<BrainAnswer> {
+    if (this.synthesizing) return answer;
+    try {
+      const veredelt = await this.deliberate({ ...options, mode: 'oracle' }, answer, this.settings());
+      return veredelt ?? answer;
+    } catch {
+      return answer;
+    }
+  }
+
   /** Eine Antwort in ein anderes Modell weitergeben (z. B. "besser machen"). */
   async escalate(options: BrainRunOptions): Promise<BrainAnswer> {
     return this.run({ ...options, mode: 'cloud' });
@@ -427,6 +634,16 @@ export class Brain {
     return lines;
   }
 }
+
+function letzteNutzerfrage(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].role === 'user') return messages[index].content.slice(0, 1200);
+  }
+  return '(keine Frage angegeben)';
+}
+
+/** Modi, in denen zuerst die Cloud antwortet. */
+export const CLOUD_FIRST_MODES: RouteMode[] = ['cloud', 'max', 'oracle'];
 
 function belongsTo(model: string | undefined, providerId: ProviderId): boolean {
   if (!model) return false;

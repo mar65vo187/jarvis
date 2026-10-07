@@ -31,6 +31,7 @@ interface LoadedPlugin {
       sources: Array<{ path: string; id: string }>;
       lessons: Array<{ id: string; question: string }>;
       learned?: { saved: boolean; id?: string; notePath?: string };
+      toolSteps?: Array<{ tool: string; ok: boolean; summary?: string }>;
       userMessage: string;
     }>;
     restoreLessonsFromNotes: () => Promise<number>;
@@ -163,6 +164,8 @@ function makeApp(files: Record<string, string>) {
 
 let server: TestServer;
 const created: Array<{ model: string; modelfile: string }> = [];
+const webSuchen: string[] = [];
+const dienstRufe: string[] = [];
 const deleted: Array<{ model: string }> = [];
 
 const NOTES = {
@@ -173,6 +176,51 @@ const NOTES = {
 
 beforeAll(async () => {
   server = await startServer((req, res) => {
+    if (req.url?.startsWith('/search')) {
+      // Spielt den Suchdienst (Tavily-Form)
+      const payload = JSON.parse((server.requests.at(-1)?.body as string) || '{}') as { query?: string };
+      webSuchen.push(payload.query ?? '');
+      json(res, 200, { results: [{ title: 'Obsidian-Handbuch', url: 'https://help.obsidian.md/x', content: 'Notizen, Links, Anhänge.' }] });
+      return;
+    }
+    if (req.url?.startsWith('/seite')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end('<html><head><title>Handbuch-Seite</title></head><body><h1>Vault</h1><p>Ein Vault ist ein Ordner mit Notizen.</p></body></html>');
+      return;
+    }
+    if ((req.url ?? '').startsWith('/repos/')) {
+      if (req.method === 'PUT') {
+        dienstRufe.push(`PUT ${req.url}`);
+        json(res, 201, { commit: { sha: 'abcdef1234', html_url: 'https://github.com/x/y/commit/abcdef1' } });
+        return;
+      }
+      dienstRufe.push(`GET ${req.url}`);
+      if ((req.url ?? '').includes('/contents/')) {
+        json(res, 200, { path: 'README.md', encoding: 'base64', content: Buffer.from('# Jarvis\n\nLäuft lokal und online.').toString('base64') });
+        return;
+      }
+      if ((req.url ?? '').includes('/issues')) {
+        json(res, 200, [{ number: 7, title: 'Release 2.1.0', state: 'open', labels: [{ name: 'release' }] }]);
+        return;
+      }
+      json(res, 200, {});
+      return;
+    }
+    if ((req.url ?? '').startsWith('/api/models/Qwen/')) {
+      dienstRufe.push(`GET ${req.url}`);
+      json(res, 200, { id: 'Qwen/Qwen3-8B', downloads: 4711, likes: 12, pipeline_tag: 'text-generation', cardData: { license: 'apache-2.0' } });
+      return;
+    }
+    if ((req.url ?? '').startsWith('/api/models?search=')) {
+      dienstRufe.push(`GET ${req.url}`);
+      json(res, 200, [{ id: 'Qwen/Qwen3-8B', downloads: 4711, likes: 12, pipeline_tag: 'text-generation' }]);
+      return;
+    }
+    if (req.url === '/webhook/jarvis') {
+      dienstRufe.push('POST /webhook/jarvis');
+      json(res, 200, { ok: true, nachricht: 'Workflow lief' });
+      return;
+    }
     if (req.url === '/api/tags') {
       // Angelegte Profile erscheinen - wie bei echtem Ollama - in der Modellliste.
       json(res, 200, {
@@ -222,8 +270,69 @@ beforeAll(async () => {
       const payload = JSON.parse(
         // Der Prompt steht im Rumpf der Anfrage; wir beantworten ihn fest.
         (server.requests.at(-1)?.body as string) || '{}',
-      ) as { messages?: Array<{ content: string }> };
+      ) as { messages?: Array<{ role: string; content: string }> };
+      const system = payload.messages?.[0]?.content ?? '';
       const asked = payload.messages?.at(-1)?.content ?? '';
+      const werkzeugAngeboten = system.includes('WERKZEUGE');
+      // Ein Werkzeugergebnis steht immer in einer Nutzer-Nachricht (nicht in der Systemanweisung).
+      const ergebnisDa = (payload.messages ?? []).some(
+        (m) => m.role === 'user' && m.content.includes('WERKZEUG-ERGEBNIS'),
+      );
+      if (werkzeugAngeboten && ergebnisDa) {
+        ndjson(res, [
+          JSON.stringify({ message: { role: 'assistant', content: 'Laut Werkzeug: Obsidian-Handbuch beschreibt Vaults. [W-Tool]' }, done: false }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 500, eval_count: 30 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /github/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({ message: { role: 'assistant', content: '```jarvis-tool\n{"tool": "github_file", "args": {"path": "README.md"}}\n```' }, done: false }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /huggingface/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({ message: { role: 'assistant', content: '```jarvis-tool\n{"tool": "hf_search", "args": {"query": "qwen3"}}\n```' }, done: false }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /n8n/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({ message: { role: 'assistant', content: '```jarvis-tool\n{"tool": "n8n_run", "args": {"payload": "{\\"text\\":\\"Hallo\\"}"}}\n```' }, done: false }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /lies\s+bitte\s+https?:\/\//i.test(asked)) {
+        const adresse = /(https?:\/\/[^\s,]+)/.exec(asked)?.[1] ?? `${server.url}/seite`;
+        ndjson(res, [
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content: `\`\`\`jarvis-tool\n{"tool": "web_read", "args": {"url": "${adresse}"}}\n\`\`\``,
+            },
+            done: false,
+          }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /recherchiere|internet|suche im netz/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content: '```jarvis-tool\n{"tool": "web_search", "args": {"query": "Obsidian Vault Grundlagen"}}\n```',
+            },
+            done: false,
+          }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
       const answer = asked.includes('Projekt Alpha')
         ? 'Laut [Q1] endet Projekt Alpha am 15. November; offen ist die Zusage des Lieferanten.'
         : 'Dazu habe ich keine Notiz gefunden.';
@@ -284,6 +393,158 @@ describe('Ausgeliefertes Bündel main.js', () => {
     expect(sent.messages.at(-1)!.content).toContain('QUELLEN');
     expect(sent.messages.at(-1)!.content).toContain('Projekt Alpha.md');
 
+    plugin.onunload();
+  });
+
+  it('führt einen echten Werkzeugeinsatz aus (Internetsuche) und zeigt die Schritte', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app } = makeApp(NOTES);
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+    plugin.loadData = async () => ({
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        routeMode: 'local',
+        tools: {
+          enabled: true,
+          mode: 'always',
+          effort: 'normal',
+          maxSteps: 3,
+          allowInternet: true,
+          searchProvider: 'tavily',
+          searchApiKey: 'tv-test',
+          searchBaseUrl: server.url,
+          showSteps: true,
+        },
+      },
+      keys: {},
+    });
+    await plugin.onload();
+
+    const vorher = webSuchen.length;
+    const ergebnis = await plugin.assistant.ask({
+      question: 'Recherchiere im Internet: Was ist ein Obsidian Vault?',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+
+    // Das Modell hat den Werkzeugblock geschickt, das Plugin hat ihn wirklich ausgeführt.
+    expect(webSuchen.length).toBeGreaterThan(vorher);
+    expect(webSuchen.at(-1)).toBe('Obsidian Vault Grundlagen');
+    expect(ergebnis.toolSteps?.length).toBeGreaterThan(0);
+    expect(ergebnis.toolSteps?.[0].tool).toBe('web_search');
+    expect(ergebnis.toolSteps?.[0].ok).toBe(true);
+    // Die Antwort entstand aus dem Werkzeugergebnis, nicht aus einer Erfindung.
+    expect(ergebnis.answer.text).toContain('Werkzeug');
+    // Die Suchanfrage ging wirklich an den Dienst (Tavily-Form mit Schlüssel).
+    const suchAnfragen = server.requests.filter((eintrag) => (eintrag.url ?? '').startsWith('/search'));
+    const suchAnfrage = suchAnfragen[suchAnfragen.length - 1];
+    expect(suchAnfrage).toBeTruthy();
+    const suchRumpf = JSON.parse(suchAnfrage!.body) as { api_key: string; query: string };
+    expect(suchRumpf.api_key).toBe('tv-test');
+    expect(suchRumpf.query).toBe('Obsidian Vault Grundlagen');
+
+    plugin.onunload();
+  });
+
+  it('liest eine Internetseite über das Werkzeug web_read', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app } = makeApp(NOTES);
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+    plugin.loadData = async () => ({
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        routeMode: 'local',
+        tools: {
+          enabled: true,
+          mode: 'always',
+          maxSteps: 2,
+          allowInternet: true,
+          searchProvider: 'tavily',
+          searchApiKey: 'tv-test',
+          searchBaseUrl: server.url,
+          showSteps: true,
+        },
+      },
+      keys: {},
+    });
+    await plugin.onload();
+    const ergebnis = await plugin.assistant.ask({
+      question: `Lies bitte ${server.url}/seite und fasse sie zusammen.`,
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    const schritt = ergebnis.toolSteps?.find((eintrag) => eintrag.tool === 'web_read');
+    expect(schritt).toBeTruthy();
+    expect(schritt!.ok).toBe(true);
+    // Der gelesene Seitentext ging wirklich an das Modell zurück
+    const letzterRuf = JSON.parse(server.requests.filter((eintrag) => eintrag.url === '/api/chat').at(-1)!.body) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const ergebnisBlock = letzterRuf.messages.filter((nachricht) => nachricht.role === 'user').at(-1)!.content;
+    expect(ergebnisBlock).toContain('WERKZEUG-ERGEBNIS');
+    expect(ergebnisBlock).toContain('Ein Vault ist ein Ordner mit Notizen.');
+    plugin.onunload();
+  });
+
+  it('benutzt GitHub, HuggingFace und n8n über das fertige Bündel', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app } = makeApp(NOTES);
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+    plugin.loadData = async () => ({
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        routeMode: 'local',
+        github: { enabled: true, owner: 'mar65vo187', repo: 'jarvis', branch: 'main' },
+        tools: {
+          enabled: true,
+          mode: 'always',
+          maxSteps: 2,
+          allowInternet: true,
+          githubApiBase: server.url,
+          hfBaseUrl: server.url,
+          n8nWebhookUrl: `${server.url}/webhook/jarvis`,
+          showSteps: true,
+        },
+      },
+      keys: {
+        'jarvis-ai-github': 'gh-test',
+        'jarvis-ai-n8n': 'n8n-test',
+        'jarvis-ai-huggingface': 'hf-test',
+      },
+    });
+    await plugin.onload();
+
+    const vorher = dienstRufe.length;
+    const gelesen = await plugin.assistant.ask({
+      question: 'Lies mir bitte die README aus dem GitHub-Repository vor.',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    expect(gelesen.toolSteps?.some((schritt) => schritt.tool === 'github_file')).toBe(true);
+    expect(gelesen.toolSteps?.every((schritt) => schritt.ok)).toBe(true);
+    expect(dienstRufe.some((ruf) => ruf.includes('/repos/mar65vo187/jarvis/contents/README.md'))).toBe(true);
+
+    const modelle = await plugin.assistant.ask({
+      question: 'Suche bei HuggingFace nach qwen3-Modellen.',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    expect(modelle.toolSteps?.some((schritt) => schritt.tool === 'hf_search')).toBe(true);
+    expect(dienstRufe.some((ruf) => ruf.includes('/api/models?search=qwen3'))).toBe(true);
+
+    const workflow = await plugin.assistant.ask({
+      question: 'Löse bitte den n8n-Workflow mit einer kurzen Nachricht aus.',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    expect(workflow.toolSteps?.some((schritt) => schritt.tool === 'n8n_run')).toBe(true);
+    expect(dienstRufe).toContain('POST /webhook/jarvis');
+    expect(dienstRufe.length).toBeGreaterThan(vorher + 2);
     plugin.onunload();
   });
 

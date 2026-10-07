@@ -1,4 +1,4 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.0.1
+# Prüfbericht — Jarvis AI für Obsidian 2.1.0
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
@@ -6,12 +6,14 @@ Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stan
 
 ## Kurzfassung
 
-**96 Tests in 8 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
+**155 Tests in 9 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
 Geprüft wurde gegen echte HTTP-Server auf `127.0.0.1` (kein Attrappen-Netzwerk), mit
-echten Git-Objekt-Hashes, echtem DOM und einem Ende-zu-Ende-Test auf der ausgelieferten
-Datei `main.js`. TypeScript läuft im `strict`-Modus fehlerfrei.
+echten Git-Objekt-Hashes, einem echten MCP-Kindprozess, echtem DOM und Ende-zu-Ende-Tests
+auf der ausgelieferten Datei `main.js` — inklusive Werkzeugeinsatz, Internetsuche,
+GitHub, HuggingFace und n8n. TypeScript läuft im `strict`-Modus fehlerfrei.
 
-Gefundene und **behobene** Fehler während der Entwicklung: 8 (siehe unten).
+Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0 plus 9 aus 2.1
+(siehe unten).
 
 ---
 
@@ -110,15 +112,32 @@ gelerntes Wissen mitgeliefert wird.
 - **Claude**: Stream-Ereignisse, Denk-Bausteine werden ignoriert, Tokenzahlen in beide
   Richtungen, `anthropic-version`, `anthropic-dangerous-direct-browser-access`,
   Fehlerereignisse.
-- **Gemini**: Modellliste ohne Embedding-Modelle, Stream, `systemInstruction`.
+- **Gemini**: Modellliste ohne Embedding-Modelle, Stream, `systemInstruction`,
+  `generationConfig.maxOutputTokens`.
+- **Denk-Stufen**: `reasoning_effort` geht nur mit ausdrücklicher Einstellung in den
+  OpenAI-Rumpf, `thinking` zu Claude, `generationConfig` zu Gemini; eine negative
+  Temperatur („nichts senden") wird nie mitgeschickt.
+- **HuggingFace-Router**: Modelle über `/v1/models`, Antworten über
+  `/v1/chat/completions` mit Bearer-Schlüssel.
+- **n8n**: Antworten kommen vom eigenen Webhook (`x-jarvis-key`, freier Rumpf).
 - **Streaming abschaltbar**: identischer Text, aber am Stück geliefert.
 
-## 4. Modellwahl (`tests/brain.test.ts`, 15 Tests)
+## 4. Modellwahl (`tests/brain.test.ts`, 21 Tests)
 
 Auto antwortet lokal; lokaler Fehler oder unbrauchbare Antwort → Cloud; schwere Aufgaben
 direkt Cloud; lokaler Modus bleibt lokal; Cloud-Modus nutzt nie lokal; klare Meldung ohne
 Einrichtung; Auswahl des stärksten installierten lokalen Modells; Presets enthalten
-`claude-opus-5-5`, `gpt-6-astra`, `gemini-3.8-flash`, `qwen3.6:27b`.
+`claude-opus-5-5`, `gpt-6-astra`, `gemini-3.8-flash`, `qwen3.6:27b` sowie HuggingFace-,
+n8n- und `gpt-oss:120b`-Vorschläge.
+
+**Maximum und Orakel**: Maximum nimmt immer die Cloud (der lokale Dienst wird nicht
+einmal gefragt); Orakel lässt ein zweites Modell auf einem anderen Anbieter die Antwort
+prüfen und liefert dessen überarbeitete Endfassung; hat das zweite Modell „KEINE
+EINWÄNDE", bleibt die erste Antwort; ist nur ein Anbieter eingerichtet, läuft Orakel
+nicht ins Leere, sondern antwortet normal. Über den Assistenten geprüft: Im Orakel-Modus
+wird die **fertige** Antwort geprüft (auch nach einem Werkzeuglauf), das Häkchen
+`deliberated` wird gesetzt und der Nutzer sieht den Hinweis „Orakel: Andere Modelle
+prüfen die Antwort …".
 
 ## 5. Wissensindex (`tests/vault-index.test.ts`, 12 Tests)
 
@@ -142,7 +161,37 @@ Qualität), Fehlerfall mit Hilfestellung und Cloud-Retry, Abbruch, Ausweichhinwe
 Quellenklick, Aufräumen beim Schließen, Verlaufsverwaltung (Titel, Wechsel, Löschen,
 Begrenzung auf 40 Beiträge).
 
-## 8. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 5 Tests)
+## 8. Werkzeuge (`tests/tools.test.ts`, 45 Tests)
+
+- **Protokoll**: Werkzeugliste für das Modell, Erkennung von Werkzeugblöcken (auch mit
+  `json`-Zaun und als `arguments`-Text), Kaputtes wird gemeldet statt still verschluckt,
+  Ergebnisblöcke enthalten die echten Daten.
+- **Rechner**: Punkt vor Strich, Klammern, `%`, `^`, Division durch null → Fehler,
+  deutsche Zahlen (`1.000,50` → 1000,50), Unsinn wird abgewiesen.
+- **Sperren**: `rm -rf /`, `shutdown`, `format`, Pipe auf Shell und Ähnliches werden mit
+  Begründung abgelehnt; nur mit ausdrücklicher Freigabe läuft überhaupt ein Befehl.
+- **Internet**: echte Suchdienste (Tavily-POST mit Schlüssel, Brave-Header, SearXNG,
+  DuckDuckGo-HTML-Auswertung inkl. Umleitung `//duckduckgo.com/l/?uddg=`), Seiten lesen
+  mit HTML→Text (Überschriften, Tabellen, Zeichen-Entitäten), Kürzung mit Hinweis,
+  `file://` wird abgewiesen, fehlender Schlüssel wird erklärt.
+- **Vault**: Suchen, Lesen mit Pfadvorschlägen, Schreiben nur mit Freigabe, Pfade können
+  den Vault nicht verlassen.
+- **GitHub**: Datei lesen (Base64 → UTF-8), Baum, Codesuche, Aufgaben (Pull-Requests
+  werden übersprungen), Schreiben **nur** mit Freigabe (SHA-Abfrage, Commit-Nachricht,
+  Branch, Inhalt wirklich base64-kodiert).
+- **HuggingFace**: Modell-/Datensatzsuche mit Downloads und Likes, Einzelheiten inkl.
+  Lizenz, Sprachen und Dateiliste.
+- **n8n**: Webhook wird wirklich aufgerufen, `x-jarvis-key` mitgeschickt, JSON-Rumpf
+  korrekt, Antwort kommt als Werkzeugergebnis zurück.
+- **MCP**: HTTP- und stdio-Transport (**echter Kindprozess**), Werkzeugliste,
+  Namensgebung `mcp_<server>_<werkzeug>`, Statusmeldung bei Nichterreichbarkeit,
+  Abbruch beim Schließen.
+- **Agentenschleife**: Werkzeugaufruf → Ergebnis → Endantwort; Werkzeugergebnisse sind in
+  Folge-Runden sichtbar; erfundene Werkzeugnamen lösen eine Korrekturrunde aus;
+  `maxSteps` stoppt mit Hinweis; Token werden über alle Runden addiert; Streaming wird
+  gestoppt, sobald ein Werkzeugblock beginnt.
+
+## 9. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 8 Tests)
 
 Geladen wird die echte `main.js` in einer nachgebauten Obsidian-Umgebung, mit echtem
 Ollama-Testserver:
@@ -161,9 +210,17 @@ Ollama-Testserver:
   `restoreLessonsFromNotes()` beide Lektionen aus den Markdown-Notizen zurück, verwendet
   sie sofort wieder im Prompt an das lokale Modell und erzeugt beim zweiten Lauf keine
   Dubletten.
+- **Werkzeuge im Bündel**: Frage → Modell antwortet mit Werkzeugblock → das Plugin führt
+  `web_search` wirklich aus (die Suchanfrage kommt mit Schlüssel beim Dienst an) → die
+  Antwort entsteht aus dem Werkzeugergebnis, die Schritte stehen in der Anzeige.
+- **Seite lesen im Bündel**: `web_read` lädt eine echte Seite, der gelesene Text steht
+  nachweislich im Werkzeugergebnis-Block an das Modell (nicht nur eine Zusammenfassung).
+- **Dienste im Bündel**: Über die echte Verdrahtung des Plugins werden `github_file`,
+  `hf_search` und `n8n_run` benutzt — die Anfragen kommen wirklich beim Dienst an,
+  `github_write` ist ohne Freigabe **nicht** dabei.
 - Nicht erreichbarer Dienst → verständliche Fehlermeldung.
 
-## 9. Während der Entwicklung gefundene und behobene Fehler
+## 10. Während der Entwicklung gefundene und behobene Fehler
 
 1. **GET statt POST** im CORS-Ersatzweg (`postJson` setzte keine Methode).
 2. **Suche nach Neustart kaputt**: Stichwortlisten wurden nicht mitgespeichert.
@@ -180,7 +237,28 @@ Ollama-Testserver:
 9. **Testnachbau der GitHub-Baum-Schnittstelle** schnitt den Pfad falsch ab (Testfehler,
    kein Produktfehler) — korrigiert, damit der Test wirklich prüft, was er behauptet.
 
-## 10. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)
+In Version 2.1 zusätzlich gefunden und behoben:
+
+10. **Werkzeugergebnisse waren in Folge-Runden unsichtbar**: Der Verlauf wurde pro Runde
+    neu aufgebaut, dadurch „vergaß" das Modell, was das Werkzeug geliefert hatte. Jetzt
+    wächst der Verlauf fortlaufend.
+11. **Erfundene Werkzeugnamen** wurden still ignoriert (das Modell drehte sich im Kreis).
+    Jetzt folgt eine Korrekturrunde mit der Liste der erlaubten Werkzeuge.
+12. **`calculate` scheiterte an deutschen Zahlen** (`1.000,50` → „Fehler ab Stelle 5").
+13. **Negative Temperatur** („nichts senden") wäre an Cloud-Dienste geschickt worden und
+    hätte dort zu Fehlern geführt — wird jetzt ausgelassen.
+14. **Orakel prüfte die eigene Antwort** statt ein zweites Modell, und zwar in jeder
+    Werkzeugrunde. Jetzt prüfen nur **andere** Modelle, und zwar die fertige Antwort
+    einmal am Ende.
+15. **Werkzeuge mit Cloud-Anbietern**: Bei `reasoning_effort`/`thinking` lehnten manche
+    Dienste die Anfrage ab — Jarvis wiederholt sie automatisch ohne diese Felder.
+16. **Automatische Anbieterreihenfolge** kannte HuggingFace und n8n nicht.
+17. **GitHub-Codesuche** war fest auf api.github.com verdrahtet (nicht für GitHub
+    Enterprise und nicht testbar) — nutzt jetzt die eingestellte Adresse.
+18. **Werkzeugliste im Selbsttest** prüft jetzt auch GitHub, HuggingFace und n8n mit
+    echten Aufrufen; `pluginVersion` im Werkzeug-Kontext war fest auf „3.0.0" gesetzt.
+
+## 11. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)
 
 Die veröffentlichte Version wurde mit echten Anfragen an GitHub geprüft — in der
 Reihenfolge, in der BRAT installiert (Ergebnis vom 7. Oktober 2026, Version 2.0.0):
@@ -209,7 +287,7 @@ Auch der Installationshelfer wurde ausgeführt: `install/install.sh` kopiert in 
 frischen Vault genau `main.js`, `manifest.json` und `styles.css` (Inhalt per md5 geprüft)
 und legt vor einem Update eine Sicherung der alten Dateien an.
 
-## 11. Was hier nicht geprüft werden konnte
+## 12. Was hier nicht geprüft werden konnte
 
 - **Kein echter Modelllauf**: In dieser Umgebung lief kein Ollama-Dienst und es wurden
   keine Cloud-Schlüssel verwendet. **Die Qualität echter Antworten** (und damit, wie
@@ -225,10 +303,15 @@ und legt vor einem Update eine Sicherung der alten Dateien an.
   ausgeführt — in dieser Umgebung gibt es kein PowerShell. Geprüft: der Inhalt der Dateien
   (gleiche Schritte wie `install.sh`, das ausgeführt wurde), und die Installation von Hand
   sowie über BRAT sind gleichwertige Wege ohne PowerShell.
+- **Werkzeuge gegen die echten Dienste**: GitHub, Tavily/Brave/SearXNG, HuggingFace und
+  n8n wurden gegen nachgebaute Server geprüft (gleiche Adressen, gleiche Formate), nicht
+  mit echten Schlüsseln. Der eingebaute Selbsttest prüft sie in deinem Obsidian wirklich.
+- **Befehle und Dateien außerhalb des Vaults** laufen nur unter Desktop-Obsidian; hier
+  wurde der Sperrfilter und die Freigabe geprüft, nicht die Ausführung unter Windows.
 - **Aussehen** in echten Obsidian-Themes (nutzt nur Obsidian-CSS-Variablen).
 - **Preistabelle** ist eine Momentaufnahme (Oktober 2026), Schätzung ohne Gewähr.
 
-## 12. Empfohlener erster echter Test bei dir
+## 13. Empfohlener erster echter Test bei dir
 
 1. Einstellungen → Jarvis KI → **Alle Verbindungen prüfen**.
 2. Eine Frage stellen, deren Antwort du kennst (Modus ⚡ Auto). Erwartung: lokale Antwort,
@@ -240,3 +323,14 @@ und legt vor einem Update eine Sicherung der alten Dateien an.
    sollte die fehlenden Punkte jetzt enthalten.
 6. Wenn einige Lektionen zusammen sind: 🎓 **Lernmodell bauen** → Standardmodell wird
    `jarvis-brain-vX` → erneut fragen und den Qualitätsverlauf vergleichen.
+7. **Werkzeuge**: Einstellungen → Jarvis KI → Werkzeuge → **Werkzeuge testen**. Danach
+   im Chat oben den Modus ⚡ **Maximum** wählen und fragen: „Recherchiere im Internet, wie
+   man in Obsidian Vorlagen benutzt, und lege mir daraus eine Notiz an." Erwartung: du
+   siehst die Werkzeugschritte („🛠️ n Werkzeug(e): web_search, vault_write …"), die
+   Notiz liegt danach im Vault, und die Antwort nennt die Quelle.
+8. **Orakel**: Modus 🔮 **Orakel** wählen und dieselbe Frage stellen. Erwartung: kurze
+   Wartezeit, dann „🔮 von mehreren Modellen geprüft" in der Metazeile — vorausgesetzt,
+   es sind mindestens zwei Cloud-Anbieter aktiv.
+9. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
+   Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
+   verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).

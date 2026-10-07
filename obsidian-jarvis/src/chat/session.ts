@@ -28,6 +28,12 @@ export interface ChatTurn {
     upgradedFrom?: string;
     /** ID der gelernten Lektion zu dieser Antwort. */
     lessonId?: string;
+    /** Benutzte Werkzeuge (Kurzform für die Anzeige). */
+    tools?: string[];
+    /** Von mehreren Modellen geprüft (Orakel)? */
+    deliberated?: boolean;
+    /** Nachgeschalteter Prüflauf? */
+    selfChecked?: boolean;
     /** Lokale Antwortqualität vor der Aufwertung. */
     coverageBefore?: number;
   };

@@ -9,10 +9,15 @@ import { VaultIndex, type IndexStats } from './rag/vault-index';
 import {
   ObsidianJsonFile,
   ObsidianMemoryNoteFs,
+  ObsidianToolVault,
   ObsidianVaultFileSystem,
   ObsidianVaultReader,
   OllamaEmbedder,
   PluginIndexPersist,
+  desktopNodeRequire,
+  nodeCommandRunner,
+  obsidianFetchJson,
+  obsidianHttp,
 } from './obsidian-bridge';
 import { LearningStore } from './learn/store';
 import { MemoryNotes } from './learn/notes';
@@ -31,6 +36,10 @@ import { GithubClient } from './github/client';
 import { GithubSync, type RestorePlan } from './github/sync';
 import { OllamaProvider } from './providers/ollama';
 import { formatBytes } from './util/format';
+import { McpClient, type McpServerConfig } from './tools/mcp';
+import { buildActiveTools, toolSummary, type ActiveTools, type RegistryDeps } from './tools/registry';
+import { obsidianFetch, type WebDeps } from './tools/web';
+
 
 interface PluginData {
   settings?: unknown;
@@ -49,6 +58,8 @@ export default class JarvisPlugin extends Plugin {
   learning!: LearningStore;
   memoryNotes!: MemoryNotes;
   distiller!: Distiller;
+  mcpClients = new Map<string, McpClient>();
+  toolDeps!: RegistryDeps;
   private keys: Record<string, string> = {};
   private githubSync!: GithubSync;
   private saveTimer: number | null = null;
@@ -91,6 +102,16 @@ export default class JarvisPlugin extends Plugin {
       lessons: () => this.learning.list(),
     });
 
+    const toolVault = new ObsidianToolVault(this.app);
+    const nodeRequire = desktopNodeRequire();
+    this.toolDeps = {
+      web: { fetchText: obsidianFetch() } as WebDeps,
+      runCommand: nodeRequire ? nodeCommandRunner(nodeRequire) : undefined,
+      nodeRequire,
+      http: obsidianHttp(),
+      key: (id) => this.getKey(id as KeyId),
+    };
+
     this.assistant = new Assistant({
       settings: () => this.settings,
       index: this.index,
@@ -98,6 +119,10 @@ export default class JarvisPlugin extends Plugin {
       vaultName: () => this.app.vault.getName(),
       learning: { store: this.learning, notes: this.memoryNotes },
       persistSettings: () => this.saveSettings(),
+      toolVault,
+      pluginVersion: () => this.manifest.version,
+      tools: async (context) => this.buildTools(toolVault, context),
+      closeTools: () => this.closeMcp(),
     });
 
     this.sessions = new SessionStore(raw?.sessions ?? [], async (sessions) => {
@@ -149,7 +174,142 @@ export default class JarvisPlugin extends Plugin {
     }, 5000);
   }
 
+  /**
+   * Werkzeuge für eine Anfrage bereitstellen. MCP-Verbindungen werden
+   * wiederverwendet, damit nicht bei jeder Frage neu gestartet wird.
+   */
+  private async buildTools(
+    vault: ObsidianToolVault,
+    context: { note?: (line: string) => void; signal?: AbortSignal },
+  ): Promise<ActiveTools | undefined> {
+    const settings = this.settings;
+    if (!settings.tools.enabled || settings.tools.mode === 'off') return undefined;
+    const clients: McpClient[] = [];
+    if (settings.tools.allowMcp) {
+      for (const server of settings.tools.mcpServers) {
+        if (!server.enabled) continue;
+        try {
+          clients.push(this.mcpClient(server));
+        } catch {
+          /* nicht erreichbare Server werden weiter unten gemeldet */
+        }
+      }
+    }
+    const tools = await buildActiveTools(
+      settings,
+      {
+        settings: () => this.settings,
+        index: this.index,
+        vault,
+        pluginVersion: this.manifest.version,
+        note: context.note,
+        signal: context.signal,
+      },
+      this.toolDeps,
+      clients,
+    );
+    return tools;
+  }
+
+  /** MCP-Verbindung holen oder neu aufbauen. */
+  private mcpClient(server: McpServerConfig): McpClient {
+    const vorhanden = this.mcpClients.get(server.name);
+    if (vorhanden) return vorhanden;
+    const client = new McpClient(server, {
+      fetchJson: obsidianFetchJson(),
+      nodeRequire: this.toolDeps.nodeRequire,
+    });
+    this.mcpClients.set(server.name, client);
+    return client;
+  }
+
+  /** Verbindungen zu MCP-Servern schließen (nach Einstellungsänderungen). */
+  closeTools(): void {
+    this.closeMcp();
+  }
+
+  private closeMcp(): void {
+    for (const client of this.mcpClients.values()) {
+      try {
+        client.close();
+      } catch {
+        /* bereits beendet */
+      }
+    }
+    this.mcpClients.clear();
+  }
+
+  /** Zustand aller MCP-Server (für Einstellungen und Diagnose). */
+  async mcpStatus(force = false): Promise<Array<{ name: string; ok: boolean; info: string; tools: string[] }>> {
+    const ergebnis: Array<{ name: string; ok: boolean; info: string; tools: string[] }> = [];
+    for (const server of this.settings.tools.mcpServers) {
+      if (!server.name.trim()) continue;
+      try {
+        const client = this.mcpClient(server);
+        const werkzeuge = await client.listTools(force);
+        ergebnis.push({
+          name: server.name,
+          ok: true,
+          info: client.info || server.transport,
+          tools: werkzeuge.map((werkzeug) => werkzeug.name),
+        });
+      } catch (fehler) {
+        this.mcpClients.delete(server.name);
+        ergebnis.push({ name: server.name, ok: false, info: (fehler as Error).message, tools: [] });
+      }
+    }
+    return ergebnis;
+  }
+
+  /** Selbsttest der Werkzeuge mit echten Aufrufen. */
+  async testTools(): Promise<string[]> {
+    const zeilen: string[] = [];
+    const vault = new ObsidianToolVault(this.app);
+    const tools = await this.buildTools(vault, {});
+    if (!tools) return ['⚠️ Werkzeuge sind abgeschaltet.'];
+    zeilen.push(`${tools.specs.length} Werkzeug(e) verfügbar:`);
+    for (const zeile of toolSummary(tools)) zeilen.push(`  ${zeile}`);
+    const ctx = {
+      settings: () => this.settings,
+      index: this.index,
+      vault,
+      pluginVersion: this.manifest.version,
+    };
+    const proben: Array<{ tool: string; args: Record<string, unknown> }> = [
+      { tool: 'calculate', args: { expression: '(1250 * 1.19) / 3' } },
+      { tool: 'vault_list', args: { limit: 3 } },
+    ];
+    if (this.settings.tools.allowInternet) proben.push({ tool: 'web_search', args: { query: 'Obsidian Plug-in', count: 2 } });
+    if (this.settings.tools.allowShell) proben.push({ tool: 'run_command', args: { command: 'echo Jarvis-Test' } });
+    if (this.settings.github.enabled && this.settings.github.owner) {
+      proben.push({ tool: 'github_tree', args: { limit: 5 } });
+    }
+    if (tools.names.has('hf_search')) proben.push({ tool: 'hf_search', args: { query: 'obsidian', limit: 2 } });
+    if (tools.names.has('n8n_run')) proben.push({ tool: 'n8n_run', args: { payload: '{"quelle": "jarvis-selbsttest"}' } });
+    for (const probe of proben) {
+      const spez = tools.specs.find((eintrag) => eintrag.name === probe.tool);
+      if (!spez) continue;
+      try {
+        const ergebnis = await spez.handler(probe.args, ctx);
+        zeilen.push(`${ergebnis.ok ? '✅' : '⚠️'} ${probe.tool}: ${(ergebnis.summary ?? ergebnis.text).slice(0, 160)}`);
+      } catch (fehler) {
+        zeilen.push(`❌ ${probe.tool}: ${(fehler as Error).message}`);
+      }
+    }
+    if (this.settings.tools.allowMcp && this.settings.tools.mcpServers.length) {
+      for (const status of await this.mcpStatus()) {
+        zeilen.push(
+          status.ok
+            ? `✅ MCP ${status.name} (${status.info}): ${status.tools.length} Werkzeug(e) — ${status.tools.slice(0, 6).join(', ')}`
+            : `❌ MCP ${status.name}: ${status.info}`,
+        );
+      }
+    }
+    return zeilen;
+  }
+
   onunload(): void {
+    this.closeMcp();
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
     // Lernen sofort auf Festplatte schreiben - nichts darf verloren gehen.
     void this.learning?.flush();

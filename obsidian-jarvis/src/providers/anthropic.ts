@@ -73,6 +73,7 @@ export class AnthropicProvider implements Provider {
         .filter((m) => m.role !== 'system')
         .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
       stream: true,
+      ...(request.extraParams ?? {}),
       // Bei Claude Opus 5.x ist adaptives Denken immer aktiv; Temperatur wird
       // deshalb bewusst nicht gesendet, um Widersprüche zu vermeiden.
     };

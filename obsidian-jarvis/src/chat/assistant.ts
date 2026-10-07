@@ -21,12 +21,22 @@ import type { Lesson, LearningSnapshot } from '../learn/types';
 import type { LearningStore } from '../learn/store';
 import type { MemoryNotes } from '../learn/notes';
 import { compareWithCloud, keyTerms, type ComparisonResult } from '../learn/quality';
+import { runAgent, type EffortLevel, type ToolStep } from '../tools/agent';
+import type { ActiveTools } from '../tools/registry';
+import type { ToolVault } from '../tools/types';
+import { CLOUD_FIRST_MODES } from '../brain';
 
 export interface AssistantDeps {
   settings: () => JarvisSettings;
   index: VaultIndex;
   brain: Brain;
   vaultName?: () => string;
+  /** Werkzeuge aufbauen (Internet, Vault, Rechner, MCP). Fehlt = keine Werkzeuge. */
+  tools?: (context: { note?: (line: string) => void; signal?: AbortSignal }) => Promise<ActiveTools | undefined>;
+  /** Vault-Zugriff für die Werkzeuge. */
+  toolVault?: ToolVault;
+  /** Laufende MCP-Verbindungen schließen. */
+  closeTools?: () => void;
   /** Lernsystem (optional, damit Tests ohne Lernen möglich bleiben). */
   learning?: {
     store: LearningStore;
@@ -34,6 +44,8 @@ export interface AssistantDeps {
   };
   /** Wird gerufen, wenn sich Einstellungen durch das Lernen geändert haben. */
   persistSettings?: () => Promise<void>;
+  /** Version des Plugins (für Anzeigen und Werkzeug-Hinweise). */
+  pluginVersion?: () => string;
 }
 
 export type PendingLesson = {
@@ -61,6 +73,8 @@ export interface AskOptions {
   maxTokens?: number;
   /** Manuell „gründlich" erzwingen. */
   deep?: boolean;
+  /** Wird gerufen, wenn Jarvis ein Werkzeug benutzt (Anzeige). */
+  onTool?: (step: ToolStep) => void;
 }
 
 export interface AskResult {
@@ -80,6 +94,12 @@ export interface AskResult {
   pendingLesson?: PendingLesson;
   /** Wurde direkt gelernt? */
   learned?: { saved: boolean; id?: string; notePath?: string };
+  /** Benutzte Werkzeuge (Schritte) für die Anzeige. */
+  toolSteps?: ToolStep[];
+  /** Wurde von mehreren Modellen geprüft (Orakel)? */
+  deliberated?: boolean;
+  /** Nachgeschalteter Prüflauf (Maximum/gründlich). */
+  selfChecked?: boolean;
 }
 
 const VAULT_MODES: AnswerMode[] = ['vault', 'note', 'summarize', 'tasks', 'plan', 'deep', 'critique'];
@@ -180,6 +200,8 @@ export class Assistant {
     const lessonTerms = lessons.flatMap((lesson) => lesson.terms);
     if (lessons.length) void store?.markUsed(lessons.map((lesson) => lesson.id));
 
+    const extraNotesFrüh: string[] = [];
+
     // 2. Quellen und Prompt
     const { sources, notice } = await this.gatherSources(options, lessonTerms);
     const effectiveMode: AnswerMode =
@@ -209,20 +231,123 @@ export class Assistant {
     const terms = sources.length ? keyTerms(sources) : [];
 
     // 3. Erste Antwort (lokal oder Cloud, je nach Modus)
-    let answer = await this.deps.brain.run({
-      mode: options.route,
+    // 3a. Werkzeuge: anbieten, wenn eingeschaltet (und wenn sie zur Aufgabe passen)
+    const toolsSetting = settings.tools;
+    const effort: EffortLevel = options.deep || options.route === 'max' || options.route === 'oracle' || toolsSetting.effort === 'max'
+      ? 'max'
+      : 'normal';
+    let activeTools: ActiveTools | undefined;
+    if (this.deps.tools && toolsSetting.enabled && toolsSetting.mode !== 'off') {
+      const passt = toolsSetting.mode === 'always' || options.mode !== 'chat' || /heute|aktuell|internet|suche|web|recherche|nachschauen|notiz anlegen|schreib|rechne|termine?|nachrichten|2026/i.test(options.question);
+      if (passt) {
+        try {
+          activeTools = await this.deps.tools({
+            note: options.onTool ? (line) => options.onTool!({ round: 0, tool: 'hinweis', args: {}, ok: true, label: line }) : undefined,
+            signal: options.signal,
+          });
+        } catch (fehler) {
+          extraNotesFrüh.push(`Werkzeuge nicht verfügbar: ${(fehler as Error).message}`);
+        }
+      }
+    }
+
+    // 3b. Antwort holen — mit Werkzeug-Schleife, wenn Werkzeuge aktiv sind
+    let toolSteps: ToolStep[] = [];
+    let deliberated = false;
+    let selfChecked = false;
+    const lauf = await runAgent({
+      brain: {
+        run: (eingabe) =>
+          this.deps.brain.run({
+            // Im Orakel-Modus läuft die Werkzeugschleife wie "max" — geprüft wird
+            // die fertige Antwort danach einmal (sonst würde jede Runde deliberieren).
+            mode: options.route === 'oracle' ? 'max' : options.route,
+            system: eingabe.system,
+            messages: eingabe.messages,
+            preferredModel: eingabe.preferredModel ?? options.preferredModel,
+            onDelta: eingabe.onDelta,
+            signal: eingabe.signal ?? options.signal,
+            temperature: options.temperature,
+            maxTokens: options.maxTokens,
+            heavyTask: eingabe.heavyTask ?? heavy,
+            allowEscalation: options.route === 'auto' ? settings.autoEscalate : CLOUD_FIRST_MODES.includes(options.route),
+          }),
+      },
+      question: options.question,
+      mode: effectiveMode,
+      route: options.route,
+      history: options.history,
       system,
-      messages: buildMessages(system, options.history, userMessage, settings.ui.historyLimit),
+      userMessage,
       preferredModel: options.preferredModel,
+      tools: activeTools,
+      toolContext: {
+        settings: this.deps.settings,
+        index: this.deps.index,
+        vault: this.deps.toolVault!,
+        pluginVersion: this.deps.pluginVersion?.() ?? '2.1.0',
+        note: options.onTool ? (line) => options.onTool!({ round: 0, tool: 'hinweis', args: {}, ok: true, label: line }) : undefined,
+        signal: options.signal,
+      },
+      effort,
+      maxSteps: Math.max(1, Math.min(12, toolsSetting.maxSteps || 4)),
       onDelta: options.onDelta,
+      onRoundReset: () =>
+        options.onUpgradeStart?.('Jarvis benutzt Werkzeuge — die Antwort wird danach neu geschrieben.'),
+      onTool: options.onTool,
       signal: options.signal,
-      temperature: options.temperature,
-      maxTokens: options.maxTokens,
       heavyTask: heavy,
-      allowEscalation: options.route === 'auto' ? settings.autoEscalate : false,
+    }).catch((fehler) => {
+      if (activeTools) {
+        // Werkzeuge dürfen eine Antwort nie verhindern: ohne Werkzeuge erneut versuchen.
+        extraNotesFrüh.push(`Werkzeuge abgebrochen (${(fehler as Error).message}) — Antwort ohne Werkzeuge.`);
+        return null;
+      }
+      throw fehler;
     });
+    let answer: BrainAnswer;
+    if (lauf) {
+      answer = lauf.answer;
+      toolSteps = lauf.steps;
+      extraNotesFrüh.push(...lauf.notices);
+    } else {
+      answer = await this.deps.brain.run({
+        mode: options.route,
+        system,
+        messages: buildMessages(system, options.history, userMessage, settings.ui.historyLimit),
+        preferredModel: options.preferredModel,
+        onDelta: options.onDelta,
+        signal: options.signal,
+        temperature: options.temperature,
+        maxTokens: options.maxTokens,
+        heavyTask: heavy,
+        allowEscalation: options.route === 'auto' ? settings.autoEscalate : CLOUD_FIRST_MODES.includes(options.route),
+      });
+    }
+
+    // 3c. Orakel: Die fertige Antwort (ggf. nach Werkzeugen) von anderen Modellen prüfen lassen.
+    if (options.route === 'oracle' && !answer.deliberated && typeof this.deps.brain.deliberateAnswer === 'function') {
+      const geprueft = await this.deps.brain
+        .deliberateAnswer(
+          {
+            mode: 'oracle',
+            system,
+            messages: buildMessages(system, options.history, userMessage, settings.ui.historyLimit),
+            signal: options.signal,
+            onDelta: options.onDelta,
+          } as never,
+          answer,
+        )
+        .catch(() => answer);
+      if (geprueft !== answer) {
+        options.onUpgradeStart?.('Orakel: Andere Modelle prüfen die Antwort — es folgt die geprüfte Endfassung.');
+        answer = geprueft;
+        extraNotesFrüh.push('🔮 Die Endfassung wurde von weiteren Modellen geprüft.');
+      }
+    }
 
     // 4. Qualität messen
+    void selfChecked;
     let quality: ComparisonResult | undefined = sources.length
       ? compareWithCloud(answer.text, sources, undefined, learning.qualityThreshold, terms)
       : undefined;
@@ -230,6 +355,13 @@ export class Assistant {
     let replacedLocalAnswer: string | undefined;
     let noticeText = notice;
     const extraNotes: string[] = [];
+    extraNotes.push(...extraNotesFrüh);
+    if (toolSteps.length) {
+      extraNotes.push(`🛠️ ${toolSteps.length} Werkzeugschritt(e): ${toolSteps.map((step) => step.tool).join(', ')}`);
+    }
+    // Orakel: andere Modelle haben die Antwort geprüft (das Gehirn meldet das zurück).
+    if (answer.deliberated) deliberated = true;
+    if (effort === 'max' && toolSteps.length) selfChecked = true;
 
     // 5. Aufwerten: lokale Antwort zu schwach -> Cloud übernimmt (nur im Auto-Modus)
     const localAnswer = answer.providerId === 'ollama';
@@ -325,6 +457,9 @@ export class Assistant {
       replacedLocalAnswer,
       pendingLesson,
       learned,
+      toolSteps: toolSteps.length ? toolSteps : undefined,
+      deliberated: deliberated || undefined,
+      selfChecked: selfChecked || undefined,
     };
   }
 

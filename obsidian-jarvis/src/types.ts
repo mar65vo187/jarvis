@@ -3,12 +3,28 @@ import type { LearningSettings } from './learn/types';
 
 export type CloudKind = 'openai' | 'anthropic' | 'gemini';
 
-export type CloudProviderId = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom';
+export type CloudProviderId =
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'openrouter'
+  | 'huggingface'
+  | 'n8n'
+  | 'custom';
 
 export type ProviderId = 'ollama' | CloudProviderId;
 
-/** Wie soll Jarvis antworten? */
-export type RouteMode = 'local' | 'cloud' | 'auto';
+/**
+ * Wie soll Jarvis antworten?
+ *
+ *  - `local`  : nur Ollama auf diesem Rechner (privat, offline möglich)
+ *  - `cloud`  : die stärksten Cloud-Modelle
+ *  - `auto`   : lokal zuerst, bei Schwäche automatisch in die Cloud (und Lernen)
+ *  - `max`    : Cloud-Spitzenmodelle, schwere Fragen über mehrere Modelle abstimmen
+ *  - `oracle` : „Orakel" — erst antworten, dann von mehreren Top-Modellen prüfen
+ *               lassen und aus den Einwänden die beste Endfassung bauen
+ */
+export type RouteMode = 'local' | 'cloud' | 'auto' | 'max' | 'oracle';
 
 /** Ein einzelner Chat-Baustein. */
 export interface ChatMessage {
@@ -58,11 +74,20 @@ export interface ChatRequest {
   signal?: AbortSignal;
   /** false = Antwort am Stück statt im Stream (Standard: true). */
   allowStream?: boolean;
+  /** Zusätzliche Felder für die Anfrage (z. B. Reasoning-Stärke, Top-P). */
+  extraParams?: Record<string, unknown>;
 }
 
 export interface CloudProviderSettings {
   /** Vom Nutzer aktiviert? */
   enabled: boolean;
+  /**
+   * Wie stark das Modell nachdenken soll.
+   * 'off' = nichts senden (Standard, immer sicher).
+   * Die anderen Stufen senden die jeweils üblichen Felder; kann eine Schnittstelle
+   * das Feld nicht, wird die Anfrage automatisch ohne dieses Feld wiederholt.
+   */
+  thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
   kind: CloudKind;
   label: string;
   baseUrl: string;
@@ -139,6 +164,60 @@ export interface UiSettings {
   showCost: boolean;
 }
 
+/** Suche im Internet: welcher Dienst benutzt wird. */
+export type SearchProviderId = 'duckduckgo' | 'tavily' | 'brave' | 'searxng';
+
+/** Ein MCP-Server (fremde Werkzeuge, die Jarvis benutzen darf). */
+export interface McpServerSettings {
+  name: string;
+  enabled: boolean;
+  transport: 'http' | 'stdio';
+  url: string;
+  command: string;
+  args: string[];
+  headers: Record<string, string>;
+  env: Record<string, string>;
+  timeoutSeconds: number;
+}
+
+/** Werkzeuge: was Jarvis zusätzlich zum Antworten darf. */
+export interface ToolsSettings {
+  /** Hauptschalter. */
+  enabled: boolean;
+  /** Wann Werkzeuge benutzt werden: nie, bei Bedarf oder immer. */
+  mode: 'off' | 'auto' | 'always';
+  /** Wie gründlich gearbeitet wird. */
+  effort: 'normal' | 'max';
+  /** Höchstzahl Werkzeugrunden (Schutz vor Endlosschleifen). */
+  maxSteps: number;
+  /** Zugriff auf das Internet (Suchen, Seiten lesen). */
+  allowInternet: boolean;
+  searchProvider: SearchProviderId;
+  searchApiKey: string;
+  searchBaseUrl: string;
+  /** Notizen anlegen oder ändern. */
+  allowVaultWrite: boolean;
+  /** Befehle auf dem Rechner ausführen (nur Desktop). */
+  allowShell: boolean;
+  /** Dateien außerhalb des Vaults lesen/schreiben (nur Desktop). */
+  allowFiles: boolean;
+  /** Fremde MCP-Werkzeuge benutzen. */
+  allowMcp: boolean;
+  /** Dateien im verbundenen GitHub-Repository schreiben (Commits). */
+  allowGithubWrite: boolean;
+  /** Eigene Adressen für Dienste (leer = Standard). */
+  githubApiBase: string;
+  hfBaseUrl: string;
+  /** n8n-Webhook, den Jarvis auslösen darf. */
+  n8nWebhookUrl: string;
+  mcpServers: McpServerSettings[];
+  commandTimeoutSeconds: number;
+  /** Zusätzlich gesperrte Befehlsbausteine. */
+  shellBlocklist: string[];
+  /** Schritte unter der Antwort anzeigen. */
+  showSteps: boolean;
+}
+
 export interface JarvisSettings {
   routeMode: RouteMode;
   /** Bei auto: lokal antworten, aber bei Bedarf automatisch auf Cloud ausweichen. */
@@ -149,6 +228,7 @@ export interface JarvisSettings {
   cloud: Record<CloudProviderId, CloudProviderSettings>;
   rag: RagSettings;
   learning: LearningSettings;
+  tools: ToolsSettings;
   github: GithubSettings;
   ui: UiSettings;
   /** Zusätzliche Anweisungen vom Nutzer an das Modell. */

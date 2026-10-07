@@ -387,3 +387,173 @@ describe('Gemini (Google)', () => {
     expect(sent.contents).toHaveLength(1);
   });
 });
+
+describe('Neue Anbieter und Denk-Stufen', () => {
+  it('Hugging Face: nutzt den Router mit Bearer-Schlüssel und listet Modelle', async () => {
+    let server: TestServer | null = null;
+    const gesehen: Array<{ url: string; auth: string }> = [];
+    try {
+      server = await startServer((req, res, body) => {
+        gesehen.push({ url: req.url ?? '', auth: String((req.headers ?? {})['authorization'] ?? '') });
+        if (req.url === '/v1/models') {
+          json(res, 200, { data: [{ id: 'Qwen/Qwen3-235B-A22B-Instruct-2507' }, { id: 'zai-org/GLM-4.6' }] });
+          return;
+        }
+        if (req.url === '/v1/chat/completions') {
+          const payload = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
+          sse(res, [
+            JSON.stringify({ choices: [{ delta: { content: `${payload.model} sagt: Hallo` } }] }),
+            JSON.stringify({ choices: [], usage: { prompt_tokens: 12, completion_tokens: 3 } }),
+          ]);
+          return;
+        }
+        json(res, 404, {});
+      });
+
+      const provider = new OpenAiCompatProvider({
+        id: 'huggingface',
+        label: 'Hugging Face (Router)',
+        baseUrl: () => `${server!.url}/v1`,
+        apiKey: () => 'hf_test',
+        reasoningStyle: 'openai',
+      });
+      const modelle = await provider.listModels();
+      expect(modelle.map((modell) => modell.id)).toContain('zai-org/GLM-4.6');
+      expect(gesehen[0].auth).toBe('Bearer hf_test');
+
+      const antwort = await provider.chat({
+        model: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
+        system: 'Du bist Jarvis.',
+        messages: [{ role: 'user', content: 'Hallo' }],
+      });
+      expect(antwort.text).toContain('sagt: Hallo');
+      expect(antwort.providerId).toBe('huggingface');
+      expect(antwort.usage?.outputTokens).toBe(3);
+    } finally {
+      await server?.close();
+    }
+  });
+
+  it('n8n: schickt die Anfrage an den Webhook und liest die Antwort', async () => {
+    let server: TestServer | null = null;
+    let empfangen: Record<string, unknown> = {};
+    try {
+      server = await startServer((_req, res, body) => {
+        empfangen = JSON.parse(body) as Record<string, unknown>;
+        json(res, 200, { choices: [{ message: { content: 'Der Arbeitsablauf hat 3 E-Mails verschickt.' } }] });
+      });
+      const provider = new OpenAiCompatProvider({
+        id: 'n8n',
+        label: 'n8n',
+        baseUrl: () => server!.url,
+        apiKey: () => 'geheim',
+        reasoningStyle: 'none',
+        extraHeaders: () => ({ 'x-jarvis-key': 'geheim' }),
+      });
+      const antwort = await provider.chat({
+        model: 'jarvis',
+        system: 'Du bist Jarvis.',
+        messages: [{ role: 'user', content: 'Schicke die Rechnung per Mail.' }],
+        allowStream: false,
+      });
+      expect(antwort.text).toContain('3 E-Mails');
+      expect(empfangen.model).toBe('jarvis');
+      expect(JSON.stringify(empfangen)).toContain('Schicke die Rechnung');
+    } finally {
+      await server?.close();
+    }
+  });
+
+  it('sendet Denk-Stufen nur, wenn ausdrücklich eingeschaltet', async () => {
+    let server: TestServer | null = null;
+    const bodies: Array<Record<string, unknown>> = [];
+    try {
+      server = await startServer((_req, res, body) => {
+        bodies.push(JSON.parse(body) as Record<string, unknown>);
+        sse(res, [JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })]);
+      });
+      const provider = new OpenAiCompatProvider({
+        id: 'openai',
+        label: 'GPT',
+        baseUrl: () => server!.url,
+        apiKey: () => 'sk-test',
+        reasoningStyle: 'openai',
+      });
+      await provider.chat({
+        model: 'gpt-6-astra',
+        system: 's',
+        messages: [{ role: 'user', content: 'u' }],
+        extraParams: { reasoning_effort: 'high' },
+      });
+      expect(bodies[0].reasoning_effort).toBe('high');
+
+      await provider.chat({ model: 'gpt-6-astra', system: 's', messages: [{ role: 'user', content: 'u' }] });
+      expect(bodies[1].reasoning_effort).toBeUndefined();
+
+      // -1 heißt "nichts senden" — sonst lehnen die Anbieter die Anfrage ab
+      await provider.chat({ model: 'gpt-6-astra', system: 's', messages: [{ role: 'user', content: 'u' }], temperature: -1 });
+      expect(bodies[2].temperature).toBeUndefined();
+      await provider.chat({ model: 'gpt-6-astra', system: 's', messages: [{ role: 'user', content: 'u' }], temperature: 0.3 });
+      expect(bodies[3].temperature).toBe(0.3);
+    } finally {
+      await server?.close();
+    }
+  });
+
+  it('Claude: Denk-Budget wird als thinking-Feld gesendet', async () => {
+    let server: TestServer | null = null;
+    const bodies: Array<Record<string, unknown>> = [];
+    try {
+      server = await startServer((req, res, body) => {
+        bodies.push(JSON.parse(body) as Record<string, unknown>);
+        sse(res, [
+          JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } }),
+          JSON.stringify({ type: 'message_stop' }),
+        ]);
+        void req;
+      });
+      const provider = new AnthropicProvider(
+        () => server!.url,
+        () => 'sk-ant-test',
+      );
+      await provider.chat({
+        model: 'claude-opus-5-5',
+        system: 's',
+        messages: [{ role: 'user', content: 'u' }],
+        extraParams: { thinking: { type: 'enabled', budget_tokens: 8192 } },
+      });
+      expect(bodies[0].thinking).toEqual({ type: 'enabled', budget_tokens: 8192 });
+    } finally {
+      await server?.close();
+    }
+  });
+
+  it('Gemini: Denk-Einstellungen landen in generationConfig', async () => {
+    let server: TestServer | null = null;
+    const bodies: Array<Record<string, unknown>> = [];
+    try {
+      server = await startServer((req, res, body) => {
+        bodies.push(JSON.parse(body) as Record<string, unknown>);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }));
+        void req;
+      });
+      const provider = new GeminiProvider(
+        () => server!.url,
+        () => 'AIza-test',
+      );
+      await provider.chat({
+        model: 'gemini-3.8-flash',
+        system: 's',
+        messages: [{ role: 'user', content: 'u' }],
+        maxTokens: 500,
+        extraParams: { thinkingConfig: { thinkingBudget: 6144 } },
+      });
+      const config = bodies[0].generationConfig as Record<string, unknown>;
+      expect(config.thinkingBudget).toBeUndefined();
+      expect(config.maxOutputTokens).toBe(500);
+    } finally {
+      await server?.close();
+    }
+  });
+});

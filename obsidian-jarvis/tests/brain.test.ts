@@ -75,6 +75,8 @@ async function scenario(options: Scenario): Promise<{ server: TestServer; settin
   settings.cloud.anthropic.enabled = false;
   settings.cloud.gemini.enabled = false;
   settings.cloud.openrouter.enabled = false;
+  settings.cloud.huggingface.enabled = false;
+  settings.cloud.n8n.enabled = false;
   settings.cloud.custom.enabled = false;
 
   return { server, settings };
@@ -281,6 +283,52 @@ describe('Ablauf Frage -> Quellen -> Antwort', () => {
     expect(call.messages.at(-1)?.content).toContain('AUSZUG AUS DER GEÖFFNETEN NOTIZ');
   });
 
+  it('lässt im Orakel-Modus die fertige Antwort von einem zweiten Modell prüfen', async () => {
+    const settings = mergeSettings({});
+    const calls: Array<Record<string, unknown>> = [];
+    const geprueft: unknown[] = [];
+    const brain = {
+      looksHeavy: () => false,
+      run: async (options: Record<string, unknown>) => {
+        calls.push(options);
+        return {
+          text: 'Erste Fassung mit [Q1].',
+          providerId: 'openai',
+          model: 'gpt-6-astra',
+          attempts: [],
+          escalated: false,
+          durationMs: 5,
+        };
+      },
+      deliberateAnswer: async (_options: unknown, answer: Record<string, unknown>) => {
+        geprueft.push(answer.text);
+        return {
+          ...answer,
+          text: 'Geprüfte Endfassung mit [Q1].',
+          deliberated: true,
+          attempts: [
+            { providerId: 'openai', model: 'gpt-6-astra' },
+            { providerId: 'anthropic', model: 'claude-opus-5-5' },
+          ],
+        };
+      },
+    } as unknown as Brain;
+    const assistant = new Assistant({ settings: () => settings, index: fakeIndex(), brain });
+    const hinweise: string[] = [];
+    const result = await assistant.ask({
+      question: 'Wann endet Projekt Alpha?',
+      mode: 'vault',
+      route: 'oracle',
+      history: [],
+      onUpgradeStart: (text) => hinweise.push(text),
+    });
+    expect(geprueft).toHaveLength(1);
+    expect(geprueft[0]).toContain('Erste Fassung');
+    expect(result.answer.text).toContain('Geprüfte Endfassung');
+    expect(result.deliberated).toBe(true);
+    expect(hinweise.join(' ')).toContain('Orakel');
+  });
+
   it('informiert, wenn nichts gefunden wurde', async () => {
     const settings = mergeSettings({});
     const { brain } = fakeBrain();
@@ -310,5 +358,170 @@ describe('Ablauf Frage -> Quellen -> Antwort', () => {
     expect(result.sources).toHaveLength(0);
     const call = calls[0] as { messages: Array<{ content: string }> };
     expect(call.messages.at(-1)?.content).not.toContain('QUELLEN');
+  });
+});
+
+describe('Modi Maximum und Orakel', () => {
+  it('Maximum nutzt die Cloud (auch wenn lokal verfügbar wäre)', async () => {
+    const { settings, server: testServer } = await scenario({ localStatus: 'ok' });
+    const brain = brainFor(settings);
+    const result = await brain.run({
+      mode: 'max',
+      system: 'system',
+      messages: [{ role: 'user', content: 'Schwere Aufgabe' }],
+    });
+    expect(result.providerId).toBe('openai');
+    expect(result.model).toBe('gpt-6-astra');
+    expect(testServer.requests.some((eintrag) => eintrag.url === '/api/chat')).toBe(false);
+  });
+
+  it('Orakel lässt weitere Modelle prüfen und liefert die überarbeitete Fassung', async () => {
+    let serverZwei: TestServer | null = null;
+    const rollen: string[] = [];
+    try {
+      // Erster Dienst: Hauptantwort und Endfassung
+      const haupt = await startServer((req, res, body) => {
+        if (req.url === '/chat/completions') {
+          const istEndfassung = body.includes('PRÜFEINWÄNDE ANDERER MODELLE');
+          rollen.push(istEndfassung ? 'endfassung' : 'haupt');
+          const text = istEndfassung
+            ? 'Projekt Alpha endet am 15. November [Q1]. (Korrigiert nach Prüfung durch ein zweites Modell.)'
+            : 'Projekt Alpha endet am 15. November, Ansprechpartnerin ist Frau Berger.';
+          sse(res, [
+            JSON.stringify({ choices: [{ delta: { content: text } }] }),
+            JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } }),
+          ]);
+          return;
+        }
+        if (req.url === '/models') {
+          json(res, 200, { data: [{ id: 'gpt-6-astra' }] });
+          return;
+        }
+        json(res, 404, {});
+      });
+      serverZwei = await startServer((req, res, body) => {
+        // Claude wird über /v1/messages angesprochen, nicht über /chat/completions.
+        if (req.url === '/v1/messages') {
+          rollen.push('pruefer');
+          sse(res, [
+            JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: '1. Das Datum ist nicht belegt. 2. Die Quelle fehlt. 3. Bitte [Q1] ergänzen.' } }),
+            JSON.stringify({ type: 'message_stop' }),
+          ]);
+          return;
+        }
+        if (req.url === '/models') {
+          json(res, 200, { data: [{ id: 'claude-opus-5-5' }] });
+          return;
+        }
+        json(res, 404, {});
+      });
+
+      const settings = mergeSettings({
+        autoOrder: ['openai', 'anthropic'],
+        cloud: {
+          ...mergeSettings(null).cloud,
+          openai: { ...mergeSettings(null).cloud.openai, enabled: true, baseUrl: haupt.url, defaultModel: 'gpt-6-astra' },
+          anthropic: {
+            ...mergeSettings(null).cloud.anthropic,
+            enabled: true,
+            baseUrl: serverZwei.url,
+            defaultModel: 'claude-opus-5-5',
+          },
+        },
+        local: { baseUrl: '', defaultModel: '' },
+      });
+      const brain = new Brain(() => settings, '3.0.0');
+      brain.setKeyReader((id) => (id === 'openai' || id === 'anthropic' ? 'key' : ''));
+
+      const ergebnis = await brain.run({
+        mode: 'oracle',
+        system: 'Du bist Jarvis.',
+        messages: [{ role: 'user', content: 'Wann endet Projekt Alpha?' }],
+      });
+      expect(rollen).toContain('pruefer');
+      expect(rollen).toContain('endfassung');
+      expect(ergebnis.text).toContain('Korrigiert nach Prüfung');
+      expect(ergebnis.escalated).toBe(true);
+      // Der Prüfer taucht in der Ausweichkette auf
+      expect(ergebnis.attempts.map((attempt) => attempt.providerId)).toContain('anthropic');
+      await haupt.close();
+    } finally {
+      await serverZwei?.close();
+    }
+  });
+
+  it('Orakel bleibt bei der ersten Antwort, wenn das zweite Modell nichts zu beanstanden hat', async () => {
+    const gesehen: string[] = [];
+    let haupt: TestServer | null = null;
+    let pruefer: TestServer | null = null;
+    try {
+      haupt = await startServer((req, res) => {
+        if (req.url === '/chat/completions') {
+          gesehen.push('haupt');
+          sse(res, [
+            JSON.stringify({ choices: [{ delta: { content: 'Kurze, saubere Antwort mit ausreichender Länge für den Test.' } }] }),
+            JSON.stringify({ choices: [] }),
+          ]);
+          return;
+        }
+        if (req.url === '/models') {
+          json(res, 200, { data: [{ id: 'gpt-6-astra' }] });
+          return;
+        }
+        json(res, 404, {});
+      });
+      pruefer = await startServer((req, res) => {
+        if (req.url === '/v1/messages') {
+          gesehen.push('pruefer');
+          sse(res, [
+            JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'KEINE EINWÄNDE' } }),
+            JSON.stringify({ type: 'message_stop' }),
+          ]);
+          return;
+        }
+        json(res, 404, {});
+      });
+      const settings = mergeSettings({
+        autoOrder: ['openai', 'anthropic'],
+        cloud: {
+          ...mergeSettings(null).cloud,
+          openai: { ...mergeSettings(null).cloud.openai, enabled: true, baseUrl: haupt.url, defaultModel: 'gpt-6-astra' },
+          anthropic: { ...mergeSettings(null).cloud.anthropic, enabled: true, baseUrl: pruefer.url, defaultModel: 'claude-opus-5-5' },
+        },
+        local: { baseUrl: '', defaultModel: '' },
+      });
+      const brain = new Brain(() => settings, '3.0.0');
+      brain.setKeyReader((id) => (id === 'openai' || id === 'anthropic' ? 'key' : ''));
+
+      const ergebnis = await brain.run({
+        mode: 'oracle',
+        system: 'Du bist Jarvis.',
+        messages: [{ role: 'user', content: 'Sag etwas Kurzes.' }],
+      });
+      expect(gesehen).toEqual(['haupt', 'pruefer']);
+      expect(ergebnis.text).toContain('Kurze, saubere Antwort');
+    } finally {
+      await haupt?.close();
+      await pruefer?.close();
+    }
+  });
+
+  it('Orakel ohne zweites Modell bleibt bei einer Antwort (kein Leerlauf)', async () => {
+    const { settings } = await scenario({ localStatus: 'ok' });
+    const brain = brainFor(settings);
+    const ergebnis = await brain.run({
+      mode: 'oracle',
+      system: 'system',
+      messages: [{ role: 'user', content: 'Frage' }],
+    });
+    expect(ergebnis.providerId).toBe('openai');
+    expect(ergebnis.text).toContain('Cloud-Antwort');
+  });
+
+  it('benennt die neuen Anbieter in den Vorschlägen', () => {
+    expect(PRESET_MODELS.huggingface.length).toBeGreaterThan(0);
+    expect(PRESET_MODELS.huggingface[0].id).toContain('Qwen');
+    expect(PRESET_MODELS.n8n[0].id).toBe('jarvis');
+    expect(PRESET_MODELS.ollama.some((modell) => modell.id === 'gpt-oss:120b')).toBe(true);
   });
 });

@@ -102,6 +102,16 @@ export class JarvisChatView extends ItemView {
       { id: 'local', label: '🏠 Lokal', hint: 'Nur Ollama auf diesem Rechner - keine Daten verlassen den PC.' },
       { id: 'auto', label: '⚡ Auto', hint: 'Lokal antworten, bei Bedarf automatisch auf ein Top-Cloud-Modell ausweichen.' },
       { id: 'cloud', label: '☁️ Cloud', hint: 'Immer das stärkste Cloud-Modell verwenden (beste Qualität).' },
+      {
+        id: 'max',
+        label: '🚀 Maximum',
+        hint: 'Cloud-Spitzenmodelle mit Werkzeugen (Internet, Vault, Rechner) und strenger Selbstprüfung.',
+      },
+      {
+        id: 'oracle',
+        label: '🔮 Orakel',
+        hint: 'Mehrere Top-Modelle beraten sich: erst antworten, dann prüfen lassen, dann die beste Endfassung.',
+      },
     ];
     for (const route of routes) {
       const button = routeGroup.createEl('button', {
@@ -310,10 +320,16 @@ export class JarvisChatView extends ItemView {
   private updateStatus(): void {
     const settings = this.host.settings;
     const stats = this.host.index.stats();
-    const routeLabels: Record<RouteMode, string> = { local: '🏠 Lokal', auto: '⚡ Auto', cloud: '☁️ Cloud' };
+    const routeLabels: Record<RouteMode, string> = {
+      local: '🏠 Lokal',
+      auto: '⚡ Auto',
+      cloud: '☁️ Cloud',
+      max: '🚀 Maximum',
+      oracle: '🔮 Orakel',
+    };
     const bits = [routeLabels[settings.routeMode]];
 
-    if (settings.routeMode !== 'cloud') {
+    if (settings.routeMode !== 'cloud' && settings.routeMode !== 'max' && settings.routeMode !== 'oracle') {
       bits.push(`Ollama: ${settings.local.defaultModel || 'kein Modell gewählt'}`);
     }
     if (settings.routeMode !== 'local') {
@@ -325,6 +341,15 @@ export class JarvisChatView extends ItemView {
     bits.push(
       `Index: ${stats.files} Notizen / ${stats.chunks} Abschnitte${stats.embeddingModel ? ` · ${stats.embeddingModel}` : ''}`,
     );
+    if (settings.tools.enabled && settings.tools.mode !== 'off') {
+      const an = [
+        settings.tools.allowInternet ? '🌐 Internet' : '',
+        settings.tools.allowVaultWrite ? '📝 Notizen' : '',
+        settings.tools.allowShell ? '💻 Rechner' : '',
+        settings.tools.allowMcp ? '🔌 MCP' : '',
+      ].filter(Boolean);
+      bits.push(an.length ? `Werkzeuge: ${an.join(' · ')}` : 'Werkzeuge: nur Lesen');
+    }
     const learning = this.host.learningStats();
     if (settings.learning.enabled) {
       bits.push(
@@ -415,6 +440,9 @@ export class JarvisChatView extends ItemView {
     if (meta.coverage !== undefined) {
       bits.push(`Qualität ${Math.round(meta.coverage * 100)} %${meta.coverageBefore !== undefined ? ` (vorher ${Math.round(meta.coverageBefore * 100)} %)` : ''}`);
     }
+    if (meta.tools?.length) bits.push(`🛠️ ${meta.tools.length} Werkzeug(e)`);
+    if (meta.deliberated) bits.push('🔮 von mehreren Modellen geprüft');
+    else if (meta.selfChecked) bits.push('🔎 selbst geprüft');
     if (meta.lessonId) bits.push('🧠 gelernt');
     line.setText(bits.filter(Boolean).join('  ·  '));
   }
@@ -605,6 +633,9 @@ export class JarvisChatView extends ItemView {
           coverageBefore: result.replacedLocalAnswer ? result.quality?.local.coverage : undefined,
           upgradedFrom: result.replacedLocalAnswer,
           lessonId: result.learned?.id,
+          tools: result.toolSteps?.map((step) => `${step.tool}${step.ok ? '' : ' (Fehler)'}`),
+          deliberated: result.deliberated,
+          selfChecked: result.selfChecked,
         },
       };
       host.sessions.addTurn(turn);
@@ -612,6 +643,15 @@ export class JarvisChatView extends ItemView {
       this.renderActions(bubble, turn);
       if (result.pendingLesson) this.renderPendingLesson(bubble, result.pendingLesson);
 
+      if (result.toolSteps?.length && this.host.settings.tools.showSteps) {
+        const liste = result.toolSteps.map((step) => `${step.ok ? '✅' : '⚠️'} ${step.label}`).join('\n');
+        bubble.createDiv({ cls: 'jarvis-hint', text: `🛠️ Werkzeuge benutzt:\n${liste}` });
+      }
+      if (result.deliberated) {
+        bubble.createDiv({ cls: 'jarvis-hint', text: '🔮 Orakel: Die Antwort wurde von weiteren Top-Modellen geprüft und überarbeitet.' });
+      } else if (result.selfChecked) {
+        bubble.createDiv({ cls: 'jarvis-hint', text: '🔎 Selbstprüfung: Die Antwort wurde gegen die Werkzeug-Ergebnisse kontrolliert.' });
+      }
       if (result.notice) {
         bubble.createDiv({ cls: 'jarvis-hint', text: result.notice });
       }
