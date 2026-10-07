@@ -6,7 +6,7 @@ Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antwor
 er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
 ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
-**Neu in 2.1.0 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
+**Neu in 2.1.0/2.1.1 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
 Seiten, liest und schreibt Notizen, rechnet, liest Dateien, führt auf dem Desktop Befehle
 aus, liest Dateien und Aufgaben aus deinem GitHub-Repository, findet Modelle auf
 HuggingFace, löst n8n-Workflows aus und bindet fremde MCP-Server an. Zwei neue Modi
@@ -17,9 +17,9 @@ kommen dazu: **Maximum** (immer die stärksten Modelle, mit Prüflauf) und **Ora
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.1.0 |
+| **Version** | 2.1.1 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 155 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 165 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -155,6 +155,17 @@ jeder Schritt in der Antwort (Schalter „Werkzeugschritte anzeigen").
 | `hf_search`, `hf_info` | Modelle, Datensätze und Apps auf HuggingFace finden und prüfen | immer (Schlüssel optional) |
 | `n8n_run` | n8n-Workflow über Webhook auslösen | „n8n-Webhook" |
 | `mcp_<server>_<werkzeug>` | Werkzeuge fremder MCP-Server (Dateien, Browser, Datenbanken …) | „MCP" |
+| `note_current` | Die gerade geöffnete Notiz samt markiertem Text | immer |
+| `note_links` | Verweise einer Notiz: was sie verlinkt und was auf sie verweist (Backlinks) | immer |
+| `vault_tags` | Alle Tags im Vault, häufigste zuerst | immer |
+| `note_open` | Öffnet eine Notiz in Obsidian (z. B. nach dem Anlegen) | immer |
+| `daily_note` | Tagesnotiz von heute lesen | immer |
+| `daily_append` | Eintrag an die Tagesnotiz anhängen | „Notizen anlegen und ändern" |
+| `editor_replace` | Markierten Text in der offenen Notiz ersetzen | „Notizen anlegen und ändern" |
+
+Die Obsidian-Werkzeuge kennen die geöffnete Notiz, die Auswahl im Editor, Tagesnotizen
+(„Tagesnotizen-Ordner" einstellen, z. B. `Journal`), Verweise und Tags — damit kann Jarvis
+Dinge, die nur von innen funktionieren.
 
 **So läuft ein Werkzeugeinsatz ab:** Jarvis bekommt die Werkzeugliste in seine
 Anweisung, antwortet in einer Runde mit einem Werkzeugblock, das Plugin führt ihn
@@ -358,7 +369,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 cd obsidian-jarvis
 npm ci
 npm run typecheck   # TypeScript strict
-npm test            # 155 Tests; baut vorher automatisch das Bündel
+npm test            # 165 Tests; baut vorher automatisch das Bündel
 npm run build       # erzeugt main.js
 ```
 
@@ -370,7 +381,8 @@ src/
   providers/             ollama | openai-compat | anthropic | gemini (mit Denk-Stufen)
   tools/                 types | protocol (Werkzeugblöcke) | agent (Schleife) | registry
                          (Vault, Rechner, Shell, Dateien) | web (Suche/Seiten lesen) |
-                         dienste (GitHub, HuggingFace, n8n) | mcp (fremde Werkzeuge)
+                         dienste (GitHub, HuggingFace, n8n) | obsidian (Notiz, Auswahl,
+                         Backlinks, Tags, Tagesnotiz) | mcp (fremde Werkzeuge)
   rag/                   vault-index.ts (Suche), prompt.ts (Prompts inkl. Lektionen)
   learn/                 types.ts, quality.ts (Messung), store.ts (Lernspeicher),
                          distill.ts (Ollama-Profil), notes.ts (Markdown im Vault)
@@ -378,7 +390,7 @@ src/
   github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
   obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
-tests/                   155 Tests in 9 Dateien inkl. Ende-zu-Ende-Tests auf main.js
+tests/                   165 Tests in 9 Dateien inkl. Ende-zu-Ende-Tests auf main.js
                          (Werkzeuge, Internet, GitHub, HuggingFace, n8n)
 ```
 
@@ -392,7 +404,7 @@ im Manifest, Ladbarkeit des Bündels):
 
 ```bash
 node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
-node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.0 --streng
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.1 --streng
 ```
 
 Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den

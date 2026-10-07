@@ -142,6 +142,7 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     githubApiBase: '',
     hfBaseUrl: '',
     n8nWebhookUrl: '',
+    dailyNoteFolder: '',
     mcpServers: [],
     commandTimeoutSeconds: 60,
     shellBlocklist: [],
@@ -745,6 +746,21 @@ export class JarvisSettingTab extends PluginSettingTab {
           .setValue(tools.n8nWebhookUrl)
           .onChange(async (value) => {
             tools.n8nWebhookUrl = value.trim();
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Tagesnotizen-Ordner')
+      .setDesc(
+        'Ordner deiner Tagesnotizen (leer = Vault-Wurzel), z. B. "Journal". Jarvis liest die Tagesnotiz im Format JJJJ-MM-TT.md und darf sie ergänzen.',
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder('Journal')
+          .setValue(tools.dailyNoteFolder)
+          .onChange(async (value) => {
+            tools.dailyNoteFolder = value.trim();
             await this.save();
           }),
       );

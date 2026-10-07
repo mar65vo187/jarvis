@@ -1,4 +1,4 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.1.0
+# Prüfbericht — Jarvis AI für Obsidian 2.1.1
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
@@ -6,13 +6,13 @@ Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stan
 
 ## Kurzfassung
 
-**155 Tests in 9 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
+**165 Tests in 9 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
 Geprüft wurde gegen echte HTTP-Server auf `127.0.0.1` (kein Attrappen-Netzwerk), mit
 echten Git-Objekt-Hashes, einem echten MCP-Kindprozess, echtem DOM und Ende-zu-Ende-Tests
 auf der ausgelieferten Datei `main.js` — inklusive Werkzeugeinsatz, Internetsuche,
 GitHub, HuggingFace und n8n. TypeScript läuft im `strict`-Modus fehlerfrei.
 
-Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0 plus 9 aus 2.1
+Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0 plus 10 aus 2.1
 (siehe unten).
 
 ---
@@ -161,7 +161,7 @@ Qualität), Fehlerfall mit Hilfestellung und Cloud-Retry, Abbruch, Ausweichhinwe
 Quellenklick, Aufräumen beim Schließen, Verlaufsverwaltung (Titel, Wechsel, Löschen,
 Begrenzung auf 40 Beiträge).
 
-## 8. Werkzeuge (`tests/tools.test.ts`, 45 Tests)
+## 8. Werkzeuge (`tests/tools.test.ts`, 52 Tests)
 
 - **Protokoll**: Werkzeugliste für das Modell, Erkennung von Werkzeugblöcken (auch mit
   `json`-Zaun und als `arguments`-Text), Kaputtes wird gemeldet statt still verschluckt,
@@ -186,12 +186,16 @@ Begrenzung auf 40 Beiträge).
 - **MCP**: HTTP- und stdio-Transport (**echter Kindprozess**), Werkzeugliste,
   Namensgebung `mcp_<server>_<werkzeug>`, Statusmeldung bei Nichterreichbarkeit,
   Abbruch beim Schließen.
+- **Obsidian-Oberfläche**: geöffnete Notiz samt markiertem Text (und die klare Meldung, wenn
+  keine offen ist), Verweise und Backlinks, Tags nach Häufigkeit gefiltert, Öffnen von
+  Notizen, Tagesnotiz lesen und ergänzen, Auswahl im Editor ersetzen — Schreibendes nur mit
+  Freigabe; Pfade werden bereinigt (kein Weg aus dem Vault, `.obsidian` bleibt gesperrt).
 - **Agentenschleife**: Werkzeugaufruf → Ergebnis → Endantwort; Werkzeugergebnisse sind in
   Folge-Runden sichtbar; erfundene Werkzeugnamen lösen eine Korrekturrunde aus;
   `maxSteps` stoppt mit Hinweis; Token werden über alle Runden addiert; Streaming wird
   gestoppt, sobald ein Werkzeugblock beginnt.
 
-## 9. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 8 Tests)
+## 9. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 9 Tests)
 
 Geladen wird die echte `main.js` in einer nachgebauten Obsidian-Umgebung, mit echtem
 Ollama-Testserver:
@@ -215,6 +219,10 @@ Ollama-Testserver:
   Antwort entsteht aus dem Werkzeugergebnis, die Schritte stehen in der Anzeige.
 - **Seite lesen im Bündel**: `web_read` lädt eine echte Seite, der gelesene Text steht
   nachweislich im Werkzeugergebnis-Block an das Modell (nicht nur eine Zusammenfassung).
+- **Obsidian-Oberfläche im Bündel**: Über die echte Plugin-Verdrahtung liest `note_current`
+  die geöffnete Notiz (der Inhalt steht nachweislich im Werkzeugergebnis an das Modell) und
+  `daily_append` schreibt wirklich in die Tagesnotiz — der Pfad wird aus dem eingestellten
+  Ordner und dem heutigen Datum gebildet.
 - **Dienste im Bündel**: Über die echte Verdrahtung des Plugins werden `github_file`,
   `hf_search` und `n8n_run` benutzt — die Anfragen kommen wirklich beim Dienst an,
   `github_write` ist ohne Freigabe **nicht** dabei.
@@ -257,6 +265,10 @@ In Version 2.1 zusätzlich gefunden und behoben:
     Enterprise und nicht testbar) — nutzt jetzt die eingestellte Adresse.
 18. **Werkzeugliste im Selbsttest** prüft jetzt auch GitHub, HuggingFace und n8n mit
     echten Aufrufen; `pluginVersion` im Werkzeug-Kontext war fest auf „3.0.0" gesetzt.
+19. **Der Obsidian-Nachbau in den Tests bestand aus Attrappen** (`Setting.setName` warf den
+    Namen weg, der Editor hatte keine `lastLine`) — dadurch hätten Fehler auf der
+    Einstellungsseite und in den Oberflächen-Werkzeugen unbemerkt bleiben können. Der
+    Nachbau ist jetzt näher am Original und prüft genau diese Wege.
 
 ## 11. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)
 
@@ -334,3 +346,6 @@ und legt vor einem Update eine Sicherung der alten Dateien an.
 9. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
    Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
    verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).
+10. **Obsidian-Werkzeug**: Eine Notiz öffnen, einen Satz markieren und fragen: „Was steht in
+    meiner geöffneten Notiz?" Erwartung: Jarvis nennt Pfad und Inhalt. Mit eingestelltem
+    Tagesnotizen-Ordner: „Häng an meine Tagesnotiz an: …" — der Eintrag landet wirklich dort.

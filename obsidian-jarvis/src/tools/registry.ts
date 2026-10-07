@@ -9,6 +9,7 @@ import { describeSchema, McpClient, type McpToolInfo } from './mcp';
 import { htmlToText, renderHits, webFetch, webSearch, type WebDeps } from './web';
 import { argNumber, argText, safeVaultPath, type ToolCall, type ToolContext, type ToolSpec } from './types';
 import { buildServiceTools, type DienstDeps } from './dienste';
+import { buildObsidianTools, type ObsidianKontrolle } from './obsidian';
 
 export interface RegistryDeps {
   web: WebDeps;
@@ -23,6 +24,8 @@ export interface RegistryDeps {
   http?: DienstDeps['http'];
   /** Zugangsschlüssel lesen (z. B. "github", "huggingface", "n8n"). */
   key?: (id: string) => string;
+  /** Zugriff auf die laufende Obsidian-Oberfläche (geöffnete Notiz, Auswahl, Tagesnotiz). */
+  obsidian?: ObsidianKontrolle;
 }
 
 /** Werkzeuge, die der Nutzer freigeschaltet hat. */
@@ -312,6 +315,9 @@ export async function buildActiveTools(
       }
     },
   });
+
+  // ---------------------------------------------------- Obsidian (Notiz, Auswahl, Tags)
+  specs.push(...buildObsidianTools(settings, deps.obsidian));
 
   // ------------------------------------------------- Dienste (GitHub, HF, n8n)
   specs.push(...buildServiceTools(settings, { http: deps.http, key: deps.key }));

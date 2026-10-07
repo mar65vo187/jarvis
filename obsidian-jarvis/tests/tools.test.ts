@@ -16,6 +16,7 @@ import { htmlToText, parseDuckDuckGo, unwrapDuckDuckGoUrl, decodeEntities, webSe
 import { HttpMcpTransport, McpClient, StdioMcpTransport, extractMcpMessages, describeSchema } from '../src/tools/mcp';
 import { runAgent, looksLikeToolAnswer, sumUsage } from '../src/tools/agent';
 import { safeVaultPath, argNumber, argText, type ToolVault } from '../src/tools/types';
+import { buildObsidianTools, type ObsidianKontrolle } from '../src/tools/obsidian';
 import { mergeSettings } from '../src/settings';
 import type { Source } from '../src/rag/vault-index';
 import type { BrainAnswer } from '../src/brain';
@@ -1076,5 +1077,140 @@ describe('Werkzeuge für GitHub, HuggingFace und n8n', () => {
     } finally {
       await dienste.close();
     }
+  });
+});
+
+// ------------------------------------------------ Obsidian-Werkzeuge (Notiz, Auswahl, Tags)
+
+describe('Werkzeuge für die Obsidian-Oberfläche', () => {
+  function fakeKontrolle(overrides: Partial<ObsidianKontrolle> = {}): ObsidianKontrolle {
+    const dateien: Record<string, string> = { 'Projekt Alpha.md': '# Alpha\n\nStand: 15. November.', 'Journal/2026-10-07.md': '# Heute\n\n- 10:00 Kickoff' };
+    return {
+      aktuelleNotiz: () => 'Projekt Alpha.md',
+      leseAktuelle: async () => dateien['Projekt Alpha.md'],
+      auswahl: () => 'Der markierte Satz.',
+      auswahlNotiz: () => 'Projekt Alpha.md',
+      ersetzeAuswahl: async (text: string) => {
+        dateien['Projekt Alpha.md'] = `${dateien['Projekt Alpha.md']}\n${text}`;
+        return { ok: true, text: 'Der Text wurde eingefügt.', summary: 'eingefügt' };
+      },
+      oeffne: async (pfad: string) => pfad === 'Projekt Alpha.md',
+      verweise: () => ({ ausgehend: ['Rezepte/Kuchen.md'], eingehend: ['Index.md', 'Journal/2026-10-07.md'] }),
+      tags: () => [
+        { tag: 'projekt', count: 7 },
+        { tag: 'idee', count: 2 },
+      ],
+      tagesnotizPfad: () => 'Journal/2026-10-07.md',
+      lesePfad: async (pfad: string) => dateien[pfad] ?? null,
+      schreibe: async (pfad: string, text: string) => {
+        dateien[pfad] = `${dateien[pfad] ?? ''}\n${text}`;
+        return { ok: true, text: `An "${pfad}" angehängt.`, summary: 'angehängt' };
+      },
+      ...overrides,
+    };
+  }
+
+  function baue(settings: ReturnType<typeof mergeSettings>, kontrolle: ObsidianKontrolle) {
+    return buildObsidianTools(settings, kontrolle);
+  }
+
+  async function rufe(specs: ReturnType<typeof buildObsidianTools>, name: string, args: Record<string, unknown> = {}) {
+    const spec = specs.find((eintrag) => eintrag.name === name);
+    if (!spec) throw new Error(`Werkzeug ${name} fehlt`);
+    return spec.handler(args, {} as never);
+  }
+
+  it('zeigt die geöffnete Notiz samt markiertem Text', async () => {
+    const settings = mergeSettings({});
+    const specs = baue(settings, fakeKontrolle());
+    const ergebnis = await rufe(specs, 'note_current');
+    expect(ergebnis.ok).toBe(true);
+    expect(ergebnis.text).toContain('GEÖFFNETE NOTIZ: Projekt Alpha.md');
+    expect(ergebnis.text).toContain('15. November');
+    expect(ergebnis.text).toContain('MARKIERTER TEXT');
+    expect(ergebnis.text).toContain('Der markierte Satz.');
+  });
+
+  it('erklärt verständlich, wenn keine Notiz geöffnet ist', async () => {
+    const settings = mergeSettings({});
+    const specs = baue(settings, fakeKontrolle({ aktuelleNotiz: () => '', leseAktuelle: async () => null }));
+    const ergebnis = await rufe(specs, 'note_current');
+    expect(ergebnis.ok).toBe(false);
+    expect(ergebnis.text).toContain('keine Notiz geöffnet');
+  });
+
+  it('listet Verweise und Backlinks', async () => {
+    const settings = mergeSettings({});
+    const specs = baue(settings, fakeKontrolle());
+    const ergebnis = await rufe(specs, 'note_links');
+    expect(ergebnis.ok).toBe(true);
+    expect(ergebnis.text).toContain('VERWEIST AUF (1)');
+    expect(ergebnis.text).toContain('→ Rezepte/Kuchen.md');
+    expect(ergebnis.text).toContain('WIRD VERWIESEN VON (2)');
+    expect(ergebnis.text).toContain('← Index.md');
+  });
+
+  it('filtert Tags und sortiert nach Häufigkeit', async () => {
+    const settings = mergeSettings({});
+    const specs = baue(settings, fakeKontrolle());
+    const alle = await rufe(specs, 'vault_tags');
+    expect(alle.text.indexOf('#projekt')).toBeLessThan(alle.text.indexOf('#idee'));
+    const gefiltert = await rufe(specs, 'vault_tags', { filter: 'id' });
+    expect(gefiltert.text).toContain('#idee');
+    expect(gefiltert.text).not.toContain('#projekt');
+  });
+
+  it('liest und ergänzt die Tagesnotiz (Ergänzen nur mit Freigabe)', async () => {
+    const gesperrt = mergeSettings({});
+    const ohneFreigabe = baue(gesperrt, fakeKontrolle());
+    expect(ohneFreigabe.some((spec) => spec.name === 'daily_append')).toBe(false);
+
+    const mitFreigabe = mergeSettings({ tools: { enabled: true, allowVaultWrite: true } });
+    const specs = baue(mitFreigabe, fakeKontrolle());
+    const gelesen = await rufe(specs, 'daily_note');
+    expect(gelesen.ok).toBe(true);
+    expect(gelesen.text).toContain('TAGESNOTIZ: Journal/2026-10-07.md');
+    expect(gelesen.text).toContain('10:00 Kickoff');
+    const ergaenzt = await rufe(specs, 'daily_append', { content: '- 14:00 Review' });
+    expect(ergaenzt.ok).toBe(true);
+    expect(ergaenzt.text).toContain('angehängt');
+  });
+
+  it('öffnet Notizen und schreibt nur in die Auswahl, wenn es erlaubt ist', async () => {
+    const ohneFreigabe = mergeSettings({});
+    expect(baue(ohneFreigabe, fakeKontrolle()).some((spec) => spec.name === 'editor_replace')).toBe(false);
+
+    const mitFreigabe = mergeSettings({ tools: { enabled: true, allowVaultWrite: true } });
+    const specs = baue(mitFreigabe, fakeKontrolle());
+    const geoeffnet = await rufe(specs, 'note_open', { path: 'Projekt Alpha.md' });
+    expect(geoeffnet.ok).toBe(true);
+    const fehlt = await rufe(specs, 'note_open', { path: 'Gibt es nicht.md' });
+    expect(fehlt.ok).toBe(false);
+    const ersetzt = await rufe(specs, 'editor_replace', { content: 'Neuer Satz.' });
+    expect(ersetzt.ok).toBe(true);
+    expect(ersetzt.text).toContain('eingefügt');
+  });
+
+  it('bereinigt Pfade, damit kein Weg aus dem Vault führt', async () => {
+    const settings = mergeSettings({});
+    const gesehen: string[] = [];
+    const kontrolle = fakeKontrolle({
+      verweise: (pfad: string) => {
+        gesehen.push(pfad);
+        return { ausgehend: [], eingehend: [] };
+      },
+    });
+    const specs = baue(settings, kontrolle);
+    const ergebnis = await rufe(specs, 'note_links', { path: '../../etc/passwd' });
+    expect(ergebnis.ok).toBe(true);
+    expect(ergebnis.text).toContain('keine Verweise');
+    expect(gesehen[0]).toBe('etc/passwd');
+    expect(gesehen[0]).not.toContain('..');
+
+    // Der Obsidian-Konfigurationsordner ist immer gesperrt: der Pfad wird verworfen
+    // und stattdessen die geöffnete Notiz benutzt — nie die Plugin-Daten.
+    await rufe(specs, 'note_links', { path: '.obsidian/plugins/jarvis-ai/data.json' });
+    expect(gesehen[1]).toBe('Projekt Alpha.md');
+    expect(gesehen[1]).not.toContain('.obsidian');
   });
 });

@@ -153,9 +153,26 @@ function makeApp(files: Record<string, string>) {
       getLeaf: () => ({ openFile: async () => undefined }),
       getActiveViewOfType: () => ({
         file: new TFile('Projekt Alpha.md'),
-        editor: { getSelection: () => '', getCursor: () => ({ line: 0, ch: 0 }), replaceRange: () => undefined },
+        editor: {
+          getSelection: () => editorAuswahl,
+          getCursor: () => ({ line: 0, ch: 0 }),
+          lastLine: () => 0,
+          getLine: () => 'Der letzte Satz.',
+          replaceSelection: (text: string) => {
+            editorErsetzt.push(text);
+          },
+          replaceRange: (text: string) => {
+            editorErsetzt.push(text);
+          },
+        },
       }),
       on: () => ({ id: 'event' }),
+    },
+    metadataCache: {
+      getFileCache: () => ({ links: [{ link: 'Rezepte/Kuchen' }] }),
+      getFirstLinkpathDest: (link: string) => new TFile(`${link}.md`),
+      resolvedLinks: { 'Index.md': { 'Projekt Alpha.md': 1 } },
+      getTags: () => ({ '#projekt': 3, '#idee': 1 }),
     },
     fileManager: { trashFile: async () => undefined },
   };
@@ -166,6 +183,8 @@ let server: TestServer;
 const created: Array<{ model: string; modelfile: string }> = [];
 const webSuchen: string[] = [];
 const dienstRufe: string[] = [];
+const editorErsetzt: string[] = [];
+let editorAuswahl = '';
 const deleted: Array<{ model: string }> = [];
 
 const NOTES = {
@@ -282,6 +301,26 @@ beforeAll(async () => {
         ndjson(res, [
           JSON.stringify({ message: { role: 'assistant', content: 'Laut Werkzeug: Obsidian-Handbuch beschreibt Vaults. [W-Tool]' }, done: false }),
           JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 500, eval_count: 30 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /geöffnete[n]? notiz|offene[n]? notiz/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({ message: { role: 'assistant', content: '```jarvis-tool\n{"tool": "note_current", "args": {}}\n```' }, done: false }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
+        ]);
+        return;
+      }
+      if (werkzeugAngeboten && /tagesnotiz/i.test(asked)) {
+        ndjson(res, [
+          JSON.stringify({
+            message: {
+              role: 'assistant',
+              content: '```jarvis-tool\n{"tool": "daily_append", "args": {"content": "- 14:00 Review"}}\n```',
+            },
+            done: false,
+          }),
+          JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 400, eval_count: 20 }),
         ]);
         return;
       }
@@ -545,6 +584,56 @@ describe('Ausgeliefertes Bündel main.js', () => {
     expect(workflow.toolSteps?.some((schritt) => schritt.tool === 'n8n_run')).toBe(true);
     expect(dienstRufe).toContain('POST /webhook/jarvis');
     expect(dienstRufe.length).toBeGreaterThan(vorher + 2);
+    plugin.onunload();
+  });
+
+  it('benutzt die Obsidian-Oberfläche: geöffnete Notiz lesen und Tagesnotiz ergänzen', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app, store } = makeApp(NOTES);
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+    plugin.loadData = async () => ({
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        routeMode: 'local',
+        tools: {
+          enabled: true,
+          mode: 'always',
+          maxSteps: 2,
+          allowVaultWrite: true,
+          dailyNoteFolder: 'Journal',
+          showSteps: true,
+        },
+      },
+      keys: {},
+    });
+    await plugin.onload();
+
+    const geoeffnet = await plugin.assistant.ask({
+      question: 'Was steht in meiner geöffneten Notiz?',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    expect(geoeffnet.toolSteps?.some((schritt) => schritt.tool === 'note_current')).toBe(true);
+    const gesendet = JSON.parse(server.requests.filter((eintrag) => eintrag.url === '/api/chat').at(-1)!.body) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const ergebnisBlock = gesendet.messages.filter((nachricht) => nachricht.role === 'user').at(-1)!.content;
+    expect(ergebnisBlock).toContain('GEÖFFNETE NOTIZ: Projekt Alpha.md');
+    expect(ergebnisBlock).toContain('15. November');
+
+    // Tagesnotiz: das Tagesdatum wird über die echte Plugin-Verdrahtung ermittelt.
+    editorAuswahl = '';
+    const tagesnotiz = await plugin.assistant.ask({
+      question: 'Häng bitte einen Eintrag an meine Tagesnotiz an.',
+      mode: 'auto',
+      route: 'local',
+      history: [],
+    });
+    expect(tagesnotiz.toolSteps?.some((schritt) => schritt.tool === 'daily_append')).toBe(true);
+    const heute = new Date();
+    const name = `Journal/${heute.getFullYear()}-${String(heute.getMonth() + 1).padStart(2, '0')}-${String(heute.getDate()).padStart(2, '0')}.md`;
+    expect(store.get(name) ?? '').toContain('- 14:00 Review');
     plugin.onunload();
   });
 

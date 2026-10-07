@@ -1,11 +1,12 @@
 /** Verbindet die reine Logik mit der echten Obsidian-Oberfläche. */
-import { App, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
+import { App, MarkdownView, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import type { JsonPersist } from './learn/store';
 import type { MemoryNoteFs } from './learn/notes';
 import type { VaultFileInfo, VaultReader, IndexPersist, Embedder } from './rag/vault-index';
 import type { VaultFileSystem } from './github/sync';
 import type { OllamaProvider } from './providers/ollama';
 import type { ToolVault } from './tools/types';
+import type { ObsidianKontrolle } from './tools/obsidian';
 
 const ALWAYS_IGNORED = ['.git', '.trash', 'node_modules', '.obsidian/plugins/jarvis-ai/cache'];
 
@@ -460,6 +461,145 @@ export function nodeCommandRunner(
  * Beliebiges HTTP über Obsidian (requestUrl) — keine CORS-Probleme, funktioniert
  * auf Desktop und Mobil. Wird von MCP, GitHub, HuggingFace und n8n benutzt.
  */
+/**
+ * Die Obsidian-Oberfläche für Jarvis: geöffnete Notiz, Auswahl im Editor,
+ * Tagesnotiz, Verweise und Tags. Alles defensiv — fehlt etwas, kommt eine
+ * verständliche Meldung statt eines Absturzes.
+ */
+export function obsidianKontrolle(app: App, tagesnotizOrdner: () => string): ObsidianKontrolle {
+  const datei = (pfad: string): TFile | null => {
+    const treffer = app.vault.getAbstractFileByPath(normalizePath(pfad));
+    return treffer instanceof TFile ? treffer : null;
+  };
+
+  const offenerEditor = (): { notiz: string; auswahl: string; ersetzen: (text: string) => void } | null => {
+    const view = app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || !view.file) return null;
+    const editor = view.editor;
+    if (!editor) return null;
+    return {
+      notiz: view.file.path,
+      auswahl: editor.getSelection(),
+      ersetzen: (text: string) => {
+        if (editor.getSelection()) {
+          editor.replaceSelection(text);
+          return;
+        }
+        // Nichts markiert: am Ende der Notiz einfügen.
+        const zeile = editor.lastLine();
+        const ende = editor.getLine(zeile).length;
+        editor.replaceRange(text.startsWith('\n') ? text : `\n${text}`, { line: zeile, ch: ende });
+      },
+    };
+  };
+
+  return {
+    aktuelleNotiz: () => offenerEditor()?.notiz ?? '',
+    leseAktuelle: async () => {
+      const pfad = offenerEditor()?.notiz;
+      if (!pfad) return null;
+      return obsidianToolVaultLesen(app, pfad);
+    },
+    auswahl: () => offenerEditor()?.auswahl ?? '',
+    auswahlNotiz: () => offenerEditor()?.notiz ?? '',
+    ersetzeAuswahl: async (text: string) => {
+      const editor = offenerEditor();
+      if (!editor) return { ok: false, text: 'Es ist gerade keine Notiz geöffnet.' };
+      try {
+        editor.ersetzen(text);
+        return { ok: true, text: `Der Text wurde in "${editor.notiz}" eingefügt.`, summary: 'eingefügt' };
+      } catch (fehler) {
+        return { ok: false, text: `Der Text konnte nicht eingefügt werden: ${(fehler as Error).message}` };
+      }
+    },
+    oeffne: async (pfad: string) => {
+      const ziel = datei(pfad);
+      if (!ziel) return false;
+      try {
+        await app.workspace.getLeaf(false).openFile(ziel);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    verweise: (pfad: string) => {
+      const ziel = datei(pfad);
+      const ausgehend: string[] = [];
+      const eingehend: string[] = [];
+      if (!ziel) return { ausgehend, eingehend };
+      try {
+        const cache = app.metadataCache.getFileCache(ziel);
+        for (const link of cache?.links ?? []) {
+          const zielDatei = app.metadataCache.getFirstLinkpathDest(link.link, pfad);
+          const name = zielDatei?.path ?? link.link;
+          if (name && !ausgehend.includes(name)) ausgehend.push(name);
+        }
+        const aufgeloest = app.metadataCache.resolvedLinks ?? {};
+        for (const [quelle, ziele] of Object.entries(aufgeloest)) {
+          if (quelle === pfad) continue;
+          if (ziele && Object.prototype.hasOwnProperty.call(ziele, pfad) && !eingehend.includes(quelle)) eingehend.push(quelle);
+        }
+      } catch {
+        /* Metadaten nicht verfügbar */
+      }
+      return { ausgehend: ausgehend.slice(0, 60), eingehend: eingehend.slice(0, 60) };
+    },
+    tags: () => {
+      const zaehler = new Map<string, number>();
+      try {
+        const eintraege = (app.metadataCache as { getTags?: () => Record<string, number> }).getTags?.() ?? {};
+        for (const [tag, anzahl] of Object.entries(eintraege)) {
+          zaehler.set(tag.replace(/^#/, ''), typeof anzahl === 'number' ? anzahl : 0);
+        }
+      } catch {
+        /* Tags nicht verfügbar */
+      }
+      return [...zaehler.entries()]
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    },
+    tagesnotizPfad: () => {
+      const ordner = (tagesnotizOrdner() || '').replace(/^\/+|\/+$/g, '');
+      const heute = new Date();
+      const name = `${heute.getFullYear()}-${String(heute.getMonth() + 1).padStart(2, '0')}-${String(heute.getDate()).padStart(2, '0')}.md`;
+      return ordner ? `${ordner}/${name}` : name;
+    },
+    lesePfad: async (pfad: string) => obsidianToolVaultLesen(app, pfad),
+    schreibe: async (pfad: string, text: string) => {
+      const ziel = datei(pfad);
+      try {
+        if (ziel) {
+          await app.vault.append(ziel, text.startsWith('\n') ? text : `\n${text}`);
+          return { ok: true, text: `An "${pfad}" angehängt.`, summary: 'angehängt' };
+        }
+        const ordner = pfad.split('/').slice(0, -1).join('/');
+        if (ordner && !app.vault.getAbstractFileByPath(ordner)) await app.vault.createFolder(ordner).catch(() => undefined);
+        await app.vault.create(normalizePath(pfad), `${text}\n`);
+        return { ok: true, text: `"${pfad}" wurde angelegt.`, summary: 'angelegt' };
+      } catch (fehler) {
+        return { ok: false, text: `Schreiben fehlgeschlagen: ${(fehler as Error).message}` };
+      }
+    },
+  };
+}
+
+async function obsidianToolVaultLesen(app: App, pfad: string): Promise<string | null> {
+  const treffer = app.vault.getAbstractFileByPath(normalizePath(pfad));
+  if (treffer instanceof TFile) {
+    try {
+      return await app.vault.cachedRead(treffer);
+    } catch {
+      /* fällt unten auf den Adapter zurück */
+    }
+  }
+  try {
+    if (await app.vault.adapter.exists(normalizePath(pfad))) return await app.vault.adapter.read(normalizePath(pfad));
+  } catch {
+    /* nicht lesbar */
+  }
+  return null;
+}
+
 export function obsidianHttp(): (options: {
   url: string;
   method?: string;

@@ -18,6 +18,7 @@ import {
   nodeCommandRunner,
   obsidianFetchJson,
   obsidianHttp,
+  obsidianKontrolle,
 } from './obsidian-bridge';
 import { LearningStore } from './learn/store';
 import { MemoryNotes } from './learn/notes';
@@ -110,6 +111,7 @@ export default class JarvisPlugin extends Plugin {
       nodeRequire,
       http: obsidianHttp(),
       key: (id) => this.getKey(id as KeyId),
+      obsidian: obsidianKontrolle(this.app, () => this.settings.tools.dailyNoteFolder),
     };
 
     this.assistant = new Assistant({

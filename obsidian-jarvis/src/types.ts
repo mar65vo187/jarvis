@@ -210,6 +210,8 @@ export interface ToolsSettings {
   hfBaseUrl: string;
   /** n8n-Webhook, den Jarvis auslösen darf. */
   n8nWebhookUrl: string;
+  /** Ordner der Tagesnotizen (leer = Wurzel), Format JJJJ-MM-TT.md. */
+  dailyNoteFolder: string;
   mcpServers: McpServerSettings[];
   commandTimeoutSeconds: number;
   /** Zusätzlich gesperrte Befehlsbausteine. */
