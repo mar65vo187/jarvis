@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
 import { JarvisChatView, type JarvisChatHost } from '../src/chat/view';
+import { JarvisSettingTab, mergeSettings as mergeSettingsForTab } from '../src/settings';
 import { SessionStore, createSession, sessionTitle } from '../src/chat/session';
 import { mergeSettings } from '../src/settings';
 import type { AnswerMode } from '../src/rag/prompt';
@@ -260,5 +261,87 @@ describe('Chat-Oberfläche', () => {
     (view as unknown as { controller: { abort: () => void } | null }).controller = { abort };
     await view.onClose();
     expect(abort).toHaveBeenCalled();
+  });
+
+  it('zeigt Werkzeugschritte und Orakel-Hinweis in der Antwort', async () => {
+    const { host } = makeHost({
+      assistant: {
+        ask: async () => ({
+          answer: {
+            text: 'Antwort mit [Q1] und Werkzeugwissen.',
+            providerId: 'anthropic',
+            model: 'claude-opus-5-5',
+            attempts: [{ providerId: 'anthropic', model: 'claude-opus-5-5' }],
+            escalated: false,
+            debated: false,
+            buffered: false,
+            durationMs: 3200,
+            usage: { inputTokens: 900, outputTokens: 120 },
+          },
+          sources: [{ id: 'Q1', path: 'Notiz.md', heading: 'Titel', text: 'Inhalt', score: 2 }],
+          system: 'system',
+          userMessage: 'frage',
+          heavy: false,
+          toolSteps: [
+            { round: 1, tool: 'web_search', args: { query: 'Obsidian' }, ok: true, summary: '5 Treffer', label: 'Suche' },
+            { round: 1, tool: 'vault_write', args: { path: 'Neu.md' }, ok: true, summary: 'angelegt', label: 'Notiz' },
+          ],
+          deliberated: true,
+        }),
+      } as never,
+    });
+    const view = newView(host);
+    await view.onOpen();
+    await (view as unknown as { ask: (q: string, m: AnswerMode) => Promise<void> }).ask('Frage', 'vault');
+    const text = view.contentEl.textContent ?? '';
+    // Schritte mit Klartext-Beschriftung, Zähler in der Metazeile, Orakel-Hinweis
+    expect(text).toContain('Werkzeuge benutzt');
+    expect(text).toContain('Suche');
+    expect(text).toContain('Notiz');
+    expect(text).toContain('2 Werkzeug');
+    expect(text).toContain('Orakel');
+  });
+});
+
+describe('Einstellungsseite', () => {
+  it('rendert alle Abschnitte ohne Fehler (inkl. Werkzeuge, GitHub, HuggingFace, n8n)', () => {
+    const settings = mergeSettingsForTab({});
+    const host = {
+      settings,
+      testEverything: async () => ['ok'],
+      testTools: async () => ['ok'],
+      mcpStatus: async () => [],
+      closeTools: () => undefined,
+      saveSettings: async () => undefined,
+      loadModels: async () => [],
+      listAllModels: async () => [],
+      refreshIndex: async () => ({ files: 0, chunks: 0, embedded: 0, bytes: 0, updatedAt: 0, skipped: 0, embeddingModel: null }),
+      resetIndex: async () => undefined,
+      indexStats: () => ({ files: 0, chunks: 0, embedded: 0, embeddingModel: null }),
+      getKey: () => '',
+      setKey: async () => undefined,
+      keyStorageDescription: () => 'Test',
+      learningReport: () => ['ok'],
+      distillNow: async () => 'ok',
+      wipeLearning: async () => undefined,
+      learningSnapshot: () => ({ lessons: 0, corrections: 0, avgLocalQuality: 0, avgCloudQuality: 0, improvement: 0, pending: 0 }),
+      notify: () => undefined,
+      app: new App(),
+    } as never;
+    const tab = new JarvisSettingTab(new App(), host);
+    expect(() => tab.display()).not.toThrow();
+    const text = tab.containerEl.textContent ?? '';
+    for (const erwartet of [
+      'Jarvis KI — Einstellungen',
+      'Werkzeuge',
+      'Verbundene Dienste',
+      'GitHub: Dateien schreiben',
+      'n8n-Webhook',
+      'HuggingFace-Adresse',
+      'MCP-Server',
+      'Nachdenken',
+    ]) {
+      expect(text).toContain(erwartet);
+    }
   });
 });

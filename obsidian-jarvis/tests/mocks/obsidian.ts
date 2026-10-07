@@ -233,13 +233,22 @@ type SettingCallback = (value: unknown) => unknown;
 
 export class Setting {
   settingEl: HTMLElement;
-  constructor(_container: HTMLElement) {
+  name = '';
+  constructor(container: HTMLElement) {
     this.settingEl = document.createElement('div');
+    // Wie in Obsidian: Die Zeile hängt im Einstellungsbereich.
+    container?.appendChild?.(this.settingEl);
   }
-  setName(): this {
+  setName(name: string): this {
+    this.name = name;
+    this.settingEl.dataset.settingName = name;
+    const label = document.createElement('span');
+    label.textContent = name;
+    this.settingEl.appendChild(label);
     return this;
   }
-  setDesc(): this {
+  setDesc(desc: string): this {
+    this.settingEl.dataset.settingDesc = desc;
     return this;
   }
   setClass(): this {
