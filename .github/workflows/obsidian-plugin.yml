@@ -90,3 +90,4 @@ jobs:
             obsidian-jarvis/main.js
             obsidian-jarvis/manifest.json
             obsidian-jarvis/styles.css
+            obsidian-jarvis/obsidian-jarvis-*.zip
