@@ -1,0 +1,92 @@
+name: Obsidian-Plugin bauen und veröffentlichen
+
+on:
+  push:
+    paths:
+      - 'obsidian-jarvis/**'
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'obsidian-jarvis/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: obsidian-jarvis
+
+jobs:
+  pruefen:
+    name: Prüfen und bauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: obsidian-jarvis/package-lock.json
+      - run: npm ci
+      - name: TypeScript prüfen
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Bündel bauen
+        run: npm run build
+      - name: Versionen prüfen (manifest.json, versions.json, package.json)
+        run: |
+          node -e "
+          const fs=require('fs');
+          const manifest=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+          const versions=JSON.parse(fs.readFileSync('versions.json','utf8'));
+          if(manifest.version!==pkg.version){console.error('Version in manifest.json und package.json unterschiedlich');process.exit(1);}
+          if(!versions[manifest.version]){console.error('Version fehlt in versions.json');process.exit(1);}
+          console.log('Version ok:', manifest.version);
+          "
+      - name: Paket für die Veröffentlichung schnüren
+        run: |
+          mkdir -p release
+          cp main.js manifest.json styles.css release/
+          cd release && zip -r ../obsidian-jarvis-$(node -p "require('./manifest.json').version").zip . 
+      - name: Dateien für den Release-Schritt bereitlegen
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-jarvis
+          path: |
+            obsidian-jarvis/main.js
+            obsidian-jarvis/manifest.json
+            obsidian-jarvis/styles.css
+            obsidian-jarvis/obsidian-jarvis-*.zip
+
+  veroeffentlichen:
+    name: Release anlegen
+    needs: pruefen
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: obsidian-jarvis
+      - run: npm run build
+        working-directory: obsidian-jarvis
+      - name: Release mit Plugin-Dateien anlegen
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Jarvis AI für Obsidian ${{ github.ref_name }}
+          body: |
+            Automatisch gebaut aus dem Stand dieses Tags.
+
+            **Installation über BRAT:** BRAT → „Add a beta plugin for testing" → `${{ github.repository }}`
+
+            **Oder von Hand:** `main.js`, `manifest.json`, `styles.css` herunterladen und in
+            `.obsidian/plugins/jarvis-ai/` kopieren.
+          files: |
+            obsidian-jarvis/main.js
+            obsidian-jarvis/manifest.json
+            obsidian-jarvis/styles.css
