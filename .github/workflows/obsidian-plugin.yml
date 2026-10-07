@@ -79,9 +79,14 @@ jobs:
         working-directory: obsidian-jarvis
         run: |
           VERSION=$(node -p "require('./manifest.json').version")
-          mkdir -p paket
-          cp main.js manifest.json styles.css paket/
-          (cd paket && zip -q -r "../obsidian-jarvis-${VERSION}.zip" .)
+          mkdir -p paket/jarvis-ai
+          cp main.js manifest.json styles.css paket/jarvis-ai/
+          (cd paket && zip -q -r "../obsidian-jarvis-${VERSION}.zip" jarvis-ai)
+          # Zweites Paket mit Quellcode, Tests und Prüfbericht
+          mkdir -p komplett/jarvis-ai-komplett
+          cp main.js manifest.json styles.css README.md PRUEFBERICHT.md versions.json package.json tsconfig.json esbuild.config.mjs vitest.config.ts komplett/jarvis-ai-komplett/
+          cp -r src tests install komplett/jarvis-ai-komplett/
+          (cd komplett && zip -q -r "../obsidian-jarvis-komplett-${VERSION}.zip" jarvis-ai-komplett)
           ls -l obsidian-jarvis-*.zip
       - name: Release mit Plugin-Dateien anlegen
         uses: softprops/action-gh-release@v2
@@ -101,10 +106,12 @@ jobs:
             `.obsidian/plugins/jarvis-ai/` des Vaults kopieren, Obsidian neu laden, Plug-in aktivieren.
 
             ### Enthalten
-            - 🏠 lokal über Ollama · ⚡ Auto mit automatischem Ausweichen · ☁️ Cloud (Claude Opus 5.5, GPT-6 Astra, Gemini 3.8 Flash, OpenRouter)
+            - 🏠 lokal über Ollama · ⚡ Auto mit automatischem Ausweichen · ☁️ Cloud (Claude, GPT, Gemini, OpenRouter, HuggingFace, n8n)
+            - ⚡ Maximum (Top-Modelle + Prüflauf) und 🔮 Orakel (mehrere Modelle prüfen die Antwort)
+            - 🛠️ Werkzeuge: Internet, Vault schreiben, Rechner, Befehle, GitHub, HuggingFace, n8n, MCP
             - Fragen an den Vault mit Quellenangaben, private Notizen bleiben unberührt
             - GitHub-Sicherung des Vaults mit Vorschau und Wiederherstellung
-            - Vor jedem Release: Typprüfung und 63 automatische Tests in der CI
+            - Vor jedem Release: Typprüfung und die vollständige Testreihe in der CI
           files: |
             obsidian-jarvis/main.js
             obsidian-jarvis/manifest.json
