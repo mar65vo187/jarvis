@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from 'obsidian';
+import { startServer, json, type TestServer } from './helpers/server';
 import { JarvisChatView, type JarvisChatHost } from '../src/chat/view';
 import { JarvisSettingTab, mergeSettings as mergeSettingsForTab } from '../src/settings';
+import { GithubConnectModal } from '../src/github/connect';
 import { SessionStore, createSession, sessionTitle } from '../src/chat/session';
 import { mergeSettings } from '../src/settings';
 import type { AnswerMode } from '../src/rag/prompt';
@@ -343,5 +345,103 @@ describe('Einstellungsseite', () => {
     ]) {
       expect(text).toContain(erwartet);
     }
+  });
+
+  it('zeigt den neuen Verbindungsbereich mit Anmeldung und Repository-Auswahl', () => {
+    const settings = mergeSettingsForTab({});
+    const host = {
+      settings,
+      testEverything: async () => ['ok'],
+      testTools: async () => ['ok'],
+      mcpStatus: async () => [],
+      closeTools: () => undefined,
+      saveSettings: async () => undefined,
+      loadModels: async () => [],
+      listAllModels: async () => [],
+      refreshIndex: async () => ({ files: 0, chunks: 0, embedded: 0, bytes: 0, updatedAt: 0, skipped: 0, embeddingModel: null }),
+      resetIndex: async () => undefined,
+      indexStats: () => ({ files: 0, chunks: 0, embedded: 0, embeddingModel: null }),
+      getKey: () => '',
+      setKey: async () => undefined,
+      keyStorageDescription: () => 'Test',
+      learningReport: () => ['ok'],
+      distillNow: async () => 'ok',
+      wipeLearning: async () => undefined,
+      learningSnapshot: () => ({ lessons: 0, corrections: 0, avgLocalQuality: 0, avgCloudQuality: 0, improvement: 0, pending: 0 }),
+      githubConnect: async () => undefined,
+      githubDisconnect: async () => undefined,
+      githubRepos: async () => [],
+      githubCreateRepo: async () => null,
+      githubAccount: async () => ({ ok: true, message: 'ok' }),
+      app: new App(),
+    } as never;
+    const tab = new JarvisSettingTab(new App(), host);
+    tab.display();
+    const text = tab.containerEl.textContent ?? '';
+    for (const erwartet of [
+      'Mit GitHub verbinden',
+      'Rechte prüfen',
+      'OAuth-Client-ID',
+      'Repositories laden',
+      'Neues Repository anlegen',
+      'Nicht verbunden',
+    ]) {
+      expect(text).toContain(erwartet);
+    }
+  });
+});
+
+let server: TestServer | null = null;
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+describe('Anmeldefenster (Geräte-Code)', () => {
+  it('zeigt den Code an, den GitHub ausgibt', async () => {
+    server = await startServer((req, res) => {
+      const url = req.url ?? '';
+      if (url === '/login/device/code') {
+        json(res, 200, {
+          device_code: 'device-1',
+          user_code: 'ABCD-1234',
+          verification_uri: 'https://github.com/login/device',
+          expires_in: 900,
+          interval: 5,
+        });
+        return;
+      }
+      if (url === '/login/oauth/access_token') {
+        json(res, 200, { error: 'authorization_pending' });
+        return;
+      }
+      json(res, 404, { message: 'Not Found' });
+    });
+
+    const modal = new GithubConnectModal(new App(), {
+      clientId: 'Iv1.test',
+      host: server.url,
+      onToken: async () => undefined,
+    });
+    modal.open();
+
+    // Kurz warten, bis der Code angefordert wurde.
+    for (let versuch = 0; versuch < 50; versuch++) {
+      if ((modal.contentEl.textContent ?? '').includes('ABCD-1234')) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const text = modal.contentEl.textContent ?? '';
+    expect(text).toContain('ABCD-1234');
+    expect(text).toContain('GitHub öffnen und Code eingeben');
+    modal.close();
+  });
+
+  it('zeigt ohne Client-ID die Anleitung', () => {
+    const modal = new GithubConnectModal(new App(), { clientId: '', onToken: async () => undefined });
+    modal.open();
+    const text = modal.contentEl.textContent ?? '';
+    expect(text).toContain('Enable Device flow');
+    expect(text).toContain('Client-ID');
+    modal.close();
   });
 });

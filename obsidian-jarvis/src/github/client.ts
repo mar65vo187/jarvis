@@ -18,12 +18,30 @@ export interface GithubRepoInfo {
   pushed_at?: string;
 }
 
+/** Eintrag aus der eigenen Repository-Liste. */
+export interface GithubRepoEntry {
+  fullName: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private: boolean;
+  pushedAt: string;
+}
+
+/** Angemeldetes Konto inklusive gemeldeter Rechte. */
+export interface GithubAccount {
+  login: string;
+  name: string;
+  /** Leer bei feingranularen Token - die melden ihre Rechte nicht. */
+  scopes: string[];
+}
+
 export class GithubClient {
   constructor(
     private token: () => string,
     private userAgent: string,
     /** Adresse der API - änderbar für GitHub Enterprise oder Tests. */
-    private apiBase = 'https://api.github.com',
+    private apiBase: string | (() => string) = 'https://api.github.com',
   ) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -37,12 +55,173 @@ export class GithubClient {
     };
   }
 
+  private basis(): string {
+    const value = typeof this.apiBase === 'function' ? this.apiBase() : this.apiBase;
+    const trimmed = (value ?? '').trim();
+    return trimmed || 'https://api.github.com';
+  }
+
   private api(path: string): string {
-    return `${this.apiBase.replace(/\/+$/, '')}${path}`;
+    return `${this.basis().replace(/\/+$/, '')}${path}`;
+  }
+
+  /** Web-Adresse von github.com (für GitHub Enterprise passend zur API-Adresse). */
+  webHost(): string {
+    const basis = this.basis();
+    if (basis.includes('api.github.com')) return 'https://github.com';
+    const enterprise = basis.replace(/\/api\/v3\/?$/, '');
+    return enterprise || 'https://github.com';
   }
 
   async isConfigured(): Promise<boolean> {
     return Boolean(this.token().trim());
+  }
+
+  /** Angemeldetes Konto und gemeldete Rechte (Rechte stehen im Antwortkopf). */
+  async whoami(): Promise<GithubAccount> {
+    const { text, headers } = await this.requestUser();
+    let login = '';
+    let name = '';
+    try {
+      const data = JSON.parse(text) as { login?: string; name?: string | null; message?: string };
+      login = data.login ?? '';
+      name = data.name ?? '';
+      if (!login && data.message) {
+        throw new Error(
+          /bad credentials/i.test(data.message)
+            ? 'Der GitHub-Schlüssel wird nicht mehr angenommen (Bad credentials). Bitte neu verbinden.'
+            : data.message,
+        );
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message && !login) throw error;
+      throw new Error('Antwort von GitHub war nicht lesbar.');
+    }
+    return { login, name, scopes: parseScopes(headers['x-oauth-scopes'] ?? headers['X-OAuth-Scopes']) };
+  }
+
+  /** GET /user mit verständlicher Fehlermeldung bei abgelehntem Schlüssel. */
+  private async requestUser(): Promise<{ text: string; headers: Record<string, string> }> {
+    try {
+      return await streamRequest({
+        url: this.api('/user'),
+        method: 'GET',
+        headers: this.headers(),
+        timeoutMs: 20_000,
+        allowStream: false,
+        retries: 1,
+      });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        const nachricht = githubFehlerText(error);
+        if (error.status === 401) {
+          if (/bad credentials|requires authentication/i.test(nachricht)) {
+            throw new Error(
+              'Der GitHub-Schlüssel wird nicht mehr angenommen (Bad credentials). Bitte unter "Mit GitHub verbinden" neu anmelden.',
+            );
+          }
+        }
+        if (error.status === 403 && /rate limit/i.test(nachricht)) {
+          throw new Error('GitHub-Kontingent erschöpft. Bitte in einigen Minuten erneut versuchen.');
+        }
+        if (nachricht) throw new Error(`GitHub: ${nachricht}`);
+      }
+      throw error;
+    }
+  }
+
+  /** Eigene Repositories (zuletzt genutzt zuerst). */
+  async listRepos(limit = 100): Promise<GithubRepoEntry[]> {
+    const perPage = Math.max(1, Math.min(100, limit));
+    const data = await getJson<Array<Record<string, unknown>>>({
+      url: this.api(`/user/repos?per_page=${perPage}&sort=updated&affiliation=owner,collaborator,organization_member`),
+      headers: this.headers(),
+      timeoutMs: 30_000,
+    });
+    return (Array.isArray(data) ? data : [])
+      .map((entry) => {
+        const owner = (entry.owner as { login?: string } | undefined)?.login ?? '';
+        const fullName = String(entry.full_name ?? (owner ? `${owner}/${entry.name ?? ''}` : ''));
+        return {
+          fullName,
+          owner,
+          name: String(entry.name ?? ''),
+          defaultBranch: String(entry.default_branch ?? 'main'),
+          private: Boolean(entry.private),
+          pushedAt: String(entry.pushed_at ?? ''),
+        };
+      })
+      .filter((entry) => entry.fullName.includes('/'))
+      .slice(0, limit);
+  }
+
+  /** Neues Repository anlegen (auto_init sorgt dafür, dass der Branch existiert). */
+  async createRepo(options: {
+    name: string;
+    description?: string;
+    isPrivate?: boolean;
+  }): Promise<GithubRepoEntry> {
+    const name = options.name.trim();
+    const body = JSON.stringify({
+      name,
+      description: options.description?.trim() || 'Vault-Sicherung von Jarvis AI (Obsidian)',
+      private: options.isPrivate !== false,
+      auto_init: true,
+    });
+    let json: {
+      full_name?: string;
+      name?: string;
+      default_branch?: string;
+      private?: boolean;
+      owner?: { login?: string };
+      message?: string;
+    };
+    try {
+      json = (
+        await postJson<{
+          full_name?: string;
+          name?: string;
+          default_branch?: string;
+          private?: boolean;
+          owner?: { login?: string };
+          message?: string;
+        }>({
+          url: this.api('/user/repos'),
+          method: 'POST',
+          headers: this.headers({ 'content-type': 'application/json' }),
+          body,
+          timeoutMs: 60_000,
+        })
+      ).json;
+    } catch (error) {
+      if (error instanceof HttpError) {
+        const text = githubFehlerText(error);
+        if (/name already exists/i.test(text)) {
+          throw new Error(`Ein Repository mit dem Namen "${name}" gibt es bereits. Bitte einen anderen Namen wählen.`);
+        }
+        if (error.status === 403 && /rate limit/i.test(text)) {
+          throw new Error('GitHub-Kontingent erschöpft. Bitte in einigen Minuten erneut versuchen.');
+        }
+        throw new Error(text || 'Das Repository konnte nicht angelegt werden.');
+      }
+      throw error;
+    }
+    if (!json.full_name) {
+      throw new Error(
+        /name already exists/i.test(json.message ?? '')
+          ? `Ein Repository mit dem Namen "${name}" gibt es bereits. Bitte einen anderen Namen wählen.`
+          : json.message || 'Das Repository konnte nicht angelegt werden.',
+      );
+    }
+    const owner = json.owner?.login ?? json.full_name.split('/')[0];
+    return {
+      fullName: json.full_name,
+      owner,
+      name: json.name ?? options.name.trim(),
+      defaultBranch: json.default_branch ?? 'main',
+      private: Boolean(json.private),
+      pushedAt: '',
+    };
   }
 
   async repo(owner: string, repo: string): Promise<GithubRepoInfo> {
@@ -152,14 +331,16 @@ export class GithubClient {
     return json.sha;
   }
 
-  async updateRef(owner: string, repo: string, branch: string, sha: string): Promise<void> {
+  async updateRef(owner: string, repo: string, branch: string, sha: string, force = false): Promise<void> {
     await streamRequest({
       url: this.api(`/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`),
       method: 'PATCH',
       headers: this.headers({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ sha, force: false }),
+      body: JSON.stringify({ sha, force }),
       timeoutMs: 30_000,
       allowStream: false,
+      // 422 (non-fast-forward) ist ein Konflikt, kein Netzfehler - nicht wiederholen.
+      retries: 0,
     });
   }
 
@@ -208,6 +389,27 @@ export function base64ToBytes(base64: string): Uint8Array {
 
 export function textToBase64(text: string): string {
   return bytesToBase64(new TextEncoder().encode(text));
+}
+
+/** Fehlermeldung aus einer GitHub-Antwort lesen (JSON mit "message"). */
+export function githubFehlerText(error: HttpError): string {
+  const body = (error.body ?? '').trim();
+  if (!body) return '';
+  try {
+    const parsed = JSON.parse(body) as { message?: string; error_description?: string };
+    return parsed.message ?? parsed.error_description ?? '';
+  } catch {
+    return body.slice(0, 300);
+  }
+}
+
+/** Rechte aus dem Antwortkopf "x-oauth-scopes" lesen. */
+export function parseScopes(header: string | undefined): string[] {
+  if (!header) return [];
+  return header
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
 }
 
 /** Reine JavaScript-Umsetzung von SHA-1 (Rückfall für Umgebungen ohne crypto.subtle,

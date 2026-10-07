@@ -249,13 +249,20 @@ export class Setting {
   }
   setDesc(desc: string): this {
     this.settingEl.dataset.settingDesc = desc;
+    // Wie in Obsidian: die Beschreibung steht sichtbar in der Zeile.
+    const el = document.createElement('div');
+    el.className = 'setting-item-description';
+    el.textContent = desc;
+    this.settingEl.appendChild(el);
     return this;
   }
   setClass(): this {
     return this;
   }
   addText(cb: (component: TextComponent) => unknown): this {
-    cb(new TextComponent());
+    const component = new TextComponent();
+    cb(component);
+    this.settingEl.appendChild(component.inputEl);
     return this;
   }
   addTextArea(cb: (component: TextAreaComponent) => unknown): this {
@@ -275,7 +282,9 @@ export class Setting {
     return this;
   }
   addButton(cb: (component: ButtonComponent) => unknown): this {
-    cb(new ButtonComponent());
+    const component = new ButtonComponent();
+    cb(component);
+    this.settingEl.appendChild(component.buttonEl);
     return this;
   }
   addExtraButton(cb: (component: ExtraButtonComponent) => unknown): this {
@@ -385,7 +394,8 @@ class DropdownComponent {
 
 class ButtonComponent {
   buttonEl: HTMLButtonElement = document.createElement('button');
-  setButtonText(): this {
+  setButtonText(text: string): this {
+    this.buttonEl.textContent = text;
     return this;
   }
   setIcon(): this {
