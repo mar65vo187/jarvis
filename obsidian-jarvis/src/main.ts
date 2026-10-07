@@ -33,8 +33,9 @@ import {
   type DeepPartial,
   type KeyId,
 } from './settings';
-import { GithubClient } from './github/client';
+import { GithubClient, type GithubRepoEntry } from './github/client';
 import { GithubSync, type RestorePlan } from './github/sync';
+import { GithubConnectModal } from './github/connect';
 import { OllamaProvider } from './providers/ollama';
 import { formatBytes } from './util/format';
 import { McpClient, type McpServerConfig } from './tools/mcp';
@@ -132,7 +133,11 @@ export default class JarvisPlugin extends Plugin {
     });
 
     this.githubSync = new GithubSync(
-      new GithubClient(() => this.getKey('github'), `JarvisAI-Obsidian/${this.manifest.version}`),
+      new GithubClient(
+        () => this.getKey('github'),
+        `JarvisAI-Obsidian/${this.manifest.version}`,
+        () => this.settings.tools.githubApiBase?.trim() || 'https://api.github.com',
+      ),
       new ObsidianVaultFileSystem(this.app, this.manifest.id),
       () => ({ ...this.settings.github, onlyMarkdown: this.settings.github.onlyMarkdown ?? true }),
     );
@@ -153,6 +158,11 @@ export default class JarvisPlugin extends Plugin {
         .then(() => this.refreshOpenView())
         .catch(() => undefined);
     }, 2500);
+
+    // Nach dem Start prüfen, ob GitHub neuere Inhalte hat (zweiter Rechner).
+    window.setTimeout(() => {
+      void this.tickRemoteCheck();
+    }, 8000);
 
     // Gelerntes Wissen als Notizen nachziehen (z. B. nach einem Update oder Sync)
     window.setTimeout(() => {
@@ -682,10 +692,45 @@ export default class JarvisPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: 'github-remote-check',
+      name: 'GitHub: Prüfen, ob neuere Inhalte bereitstehen',
+      callback: async () => {
+        const notice = new Notice('Jarvis vergleicht mit GitHub …', 0);
+        const meldung = await this.githubRemoteCheck();
+        notice.hide();
+        new Notice(meldung, 20000);
+      },
+    });
+
+    this.addCommand({
       id: 'github-backup',
       name: 'GitHub: Vault jetzt sichern',
       callback: async () => {
         await this.githubBackup();
+      },
+    });
+
+    this.addCommand({
+      id: 'github-connect',
+      name: 'GitHub: Mit dem Konto verbinden (Geräte-Code)',
+      callback: async () => {
+        await this.githubConnect();
+      },
+    });
+
+    this.addCommand({
+      id: 'github-status',
+      name: 'GitHub: Verbindung und Rechte prüfen',
+      callback: async () => {
+        const notice = new Notice('Jarvis prüft die GitHub-Verbindung …', 0);
+        try {
+          const ergebnis = await this.githubSync.account();
+          notice.hide();
+          new Notice(ergebnis.message, 15000);
+        } catch (error) {
+          notice.hide();
+          new Notice(`GitHub-Prüfung fehlgeschlagen: ${(error as Error).message}`, 15000);
+        }
       },
     });
 
@@ -785,6 +830,116 @@ export default class JarvisPlugin extends Plugin {
   async githubTest(): Promise<string> {
     const result = await this.githubSync.test();
     return result.message;
+  }
+
+  /** Konto und Rechte prüfen (geht auch ohne Repository-Angaben). */
+  async githubAccount(): Promise<{ ok: boolean; message: string }> {
+    return this.githubSync.account();
+  }
+
+  /** Anmeldung per Geräte-Code starten (Fenster anzeigen). */
+  async githubConnect(): Promise<void> {
+    new GithubConnectModal(this.app, {
+      clientId: this.settings.github.oauthClientId ?? '',
+      host: this.githubWebHost(),
+      onToken: async (token) => {
+        await this.setKey('github', token);
+        const konto = await this.githubSync.account();
+        if (konto.ok && konto.login) {
+          this.settings.github.login = konto.login;
+          this.settings.github.scopes = (konto.scopes ?? []).join(', ');
+          // Ohne eingetragenen Nutzer den eigenen Namen ergänzen.
+          if (!this.settings.github.owner.trim()) this.settings.github.owner = konto.login;
+        }
+        await this.saveSettings();
+      },
+      onDone: () => undefined,
+    }).open();
+  }
+
+  /** Verbindung trennen: Schlüssel entfernen, Anzeige leeren. */
+  async githubDisconnect(): Promise<void> {
+    await this.setKey('github', '');
+    this.settings.github.login = '';
+    this.settings.github.scopes = '';
+    await this.saveSettings();
+    new Notice('GitHub-Verbindung getrennt. Der gespeicherte Schlüssel wurde entfernt.', 8000);
+  }
+
+  /** Eigene Repositories auflisten (für die Auswahl in den Einstellungen). */
+  async githubRepos(): Promise<GithubRepoEntry[]> {
+    if (!this.getKey('github').trim()) {
+      new Notice('Bitte zuerst mit GitHub verbinden ("Mit GitHub verbinden").');
+      return [];
+    }
+    return this.githubSync.repos();
+  }
+
+  /** Neues Repository anlegen und direkt als Ziel eintragen. */
+  async githubCreateRepo(name: string, isPrivate: boolean): Promise<GithubRepoEntry | null> {
+    if (!this.getKey('github').trim()) {
+      new Notice('Bitte zuerst mit GitHub verbinden ("Mit GitHub verbinden").');
+      return null;
+    }
+    if (!name.trim()) {
+      new Notice('Bitte einen Namen für das Repository angeben.');
+      return null;
+    }
+    try {
+      const repo = await this.githubSync.createRepo({ name: name.trim(), isPrivate });
+      this.settings.github.owner = repo.owner;
+      this.settings.github.repo = repo.name;
+      this.settings.github.branch = repo.defaultBranch || 'main';
+      this.settings.github.enabled = true;
+      await this.saveSettings();
+      new Notice(`Repository ${repo.fullName} angelegt und als Ziel eingetragen.`, 12000);
+      return repo;
+    } catch (error) {
+      new Notice(`Repository konnte nicht angelegt werden: ${(error as Error).message}`, 15000);
+      return null;
+    }
+  }
+
+  /**
+   * Prüft, ob auf GitHub neuere Inhalte liegen als hier gesichert wurden
+   * (klassischer Fall: zweiter Rechner). Es wird nie automatisch überschrieben.
+   */
+  async githubRemoteCheck(quiet = false): Promise<string> {
+    const github = this.settings.github;
+    if (!github.enabled || !github.owner || !github.repo || !this.getKey('github').trim()) {
+      return 'GitHub ist nicht vollständig eingerichtet.';
+    }
+    try {
+      const head = await this.githubSync.remoteHead();
+      if (!head) return `Branch "${github.branch}" ist noch leer — mit "Jetzt sichern" beginnen.`;
+      if (!github.lastCommitSha) {
+        return `Auf GitHub liegt ein Commit (${head.slice(0, 7)}), dieses Gerät hat noch nicht gesichert. ` +
+          'Zum Übernehmen: "GitHub: Vault wiederherstellen".';
+      }
+      if (head === github.lastCommitSha) return `Alles aktuell — gleicher Stand wie Commit ${head.slice(0, 7)}.`;
+      return `GitHub hat neuere Inhalte (${head.slice(0, 7)}) als deine letzte Sicherung ` +
+        `(${github.lastCommitSha.slice(0, 7)}). Zum Übernehmen: "GitHub: Vault wiederherstellen" — ` +
+        'dort wird vorher eine Vorschau gezeigt.';
+    } catch (error) {
+      return `Prüfung nicht möglich: ${(error as Error).message}`;
+    }
+  }
+
+  private async tickRemoteCheck(): Promise<void> {
+    const github = this.settings.github;
+    if (!github.enabled || !github.checkRemoteOnStart) return;
+    if (!github.owner || !github.repo || !this.getKey('github').trim()) return;
+    const meldung = await this.githubRemoteCheck(true);
+    if (meldung.includes('neuere Inhalte')) {
+      new Notice(`Jarvis: ${meldung}`, 20000);
+    }
+  }
+
+  /** Web-Adresse von GitHub (bei Enterprise passend zur eingestellten API). */
+  private githubWebHost(): string {
+    const basis = this.settings.tools.githubApiBase?.trim();
+    if (!basis || basis.includes('api.github.com')) return 'https://github.com';
+    return basis.replace(/\/api\/v3\/?$/, '');
   }
 
   private githubReady(): boolean {
@@ -1207,8 +1362,14 @@ export default class JarvisPlugin extends Plugin {
     if (!anyCloud) lines.push('➖ Kein Cloud-Anbieter aktiv — Jarvis arbeitet rein lokal.');
 
     lines.push('', '— GitHub —');
+    if (!this.getKey('github').trim()) {
+      lines.push('➖ Nicht mit GitHub verbunden (Einstellungen → GitHub → "Mit GitHub verbinden").');
+    } else {
+      const konto = await this.githubAccount();
+      lines.push(konto.message);
+    }
     if (!this.settings.github.enabled) lines.push('➖ Sicherung nicht aktiviert');
-    else lines.push(await this.githubTest());
+    else if (this.getKey('github').trim()) lines.push(await this.githubTest());
 
     lines.push('', '— Wissen —');
     let stats = this.index.stats();
