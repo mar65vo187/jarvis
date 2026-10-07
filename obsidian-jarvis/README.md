@@ -206,9 +206,9 @@ diese Cloud-Antworten machen deine lokale KI besser.**
 | Jarvis: Auswahl mit Cloud-Modell überarbeiten und ersetzen | ersetzt direkt |
 | Jarvis: Lernen: Was hat Jarvis gelernt? | Bericht mit Qualitätsverlauf |
 | Jarvis: Lernen: Lokales Modell aus Gelerntem verbessern | Destillation starten |
-| Jarvis: Lernen: Gelerntes als Notizen ablegen | Markdown-Dateien nachziehen |
+| Jarvis: Lernen: Gelerntes als Notizen im Vault ablegen | Markdown-Dateien nachziehen |
 | Jarvis: Lernen: Gelerntes aus den Notizen wiederherstellen | Wissen nach Neuinstallation zurückholen |
-| Jarvis: Lernen: Gelerntes Wissen löschen | Lernspeicher leeren |
+| Jarvis: Lernen: Gelerntes Wissen löschen | Lernspeicher leeren (Notizen bleiben, bis du sie löschst) |
 | Jarvis: Wissensindex neu aufbauen | Notizen neu einlesen |
 | Jarvis: Lokales Modell aus dem Speicher entladen | RAM freigeben |
 | Jarvis: Vault jetzt sichern / wiederherstellen | GitHub mit Vorschau |
