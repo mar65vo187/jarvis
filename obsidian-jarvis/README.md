@@ -10,9 +10,9 @@ auf einem zweiten Rechner wiederhergestellt werden.
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 1.0.0 |
+| **Version** | 1.0.1 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 62 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 63 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -275,7 +275,7 @@ Cloud-Anbieter, GitHub und den Indexstand in einem Bericht.
 cd obsidian-jarvis
 npm install
 npm run typecheck   # TypeScript prüfen
-npm test            # 62 Tests (Anbieter, Routing, Index, GitHub, Oberfläche, fertiges Bündel)
+npm test            # 63 Tests (Anbieter, Routing, Index, GitHub, Oberfläche, fertiges Bündel)
 npm run build       # erzeugt main.js
 ```
 

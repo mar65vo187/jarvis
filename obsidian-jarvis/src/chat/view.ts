@@ -187,7 +187,7 @@ export class JarvisChatView extends ItemView {
 
     const noteLabel = optionsRow.createEl('label', { cls: 'jarvis-checkbox' });
     this.includeNoteToggle = noteLabel.createEl('input', { type: 'checkbox' });
-    this.includeNoteToggle.checked = true;
+    this.includeNoteToggle.checked = this.host.settings.rag.includeActiveNote;
     noteLabel.createSpan({ text: 'geöffnete Notiz einbeziehen' });
 
     const inputRow = composer.createDiv({ cls: 'jarvis-input-row' });

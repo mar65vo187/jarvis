@@ -17,7 +17,7 @@ das dieselbe Idee direkt in deinen Vault bringt:
 - **GitHub-Anbindung**: Der Vault wird als echte Commits gesichert und auf einem
   zweiten Rechner wiederhergestellt (nur geänderte Dateien, Vorschau vor jedem Schreiben).
 - Befehle für Zusammenfassen, Aufgaben, Verbessern, Übersetzen, Plan, Gegenprüfung.
-- 62 automatische Tests, alle grün – Prüfbericht und ehrliche Grenzen in
+- 63 automatische Tests, alle grün – Prüfbericht und ehrliche Grenzen in
   [`obsidian-jarvis/PRUEFBERICHT.md`](obsidian-jarvis/PRUEFBERICHT.md).
 
 **Installation:** BRAT in Obsidian installieren → „Add a beta plugin for testing" →

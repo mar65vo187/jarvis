@@ -185,6 +185,15 @@ describe('Chat-Oberfläche', () => {
     expect(received).toBeInstanceOf(AbortSignal);
   });
 
+  it('übernimmt den Standardwert für "geöffnete Notiz einbeziehen"', async () => {
+    const { host } = makeHost();
+    host.settings.rag.includeActiveNote = false;
+    const view = newView(host);
+    await view.onOpen();
+    const toggle = view.contentEl.querySelector<HTMLInputElement>('.jarvis-checkbox input')!;
+    expect(toggle.checked).toBe(false);
+  });
+
   it('schaltet gründliche Aufgaben in den Cloud-Modus', async () => {
     const { host, settings } = makeHost();
     const view = newView(host);

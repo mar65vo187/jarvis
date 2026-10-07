@@ -1,11 +1,11 @@
-# Prüfbericht — Jarvis AI für Obsidian 1.0.0
+# Prüfbericht — Jarvis AI für Obsidian 1.0.1
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner).
 
 ## Was automatisiert geprüft wurde
 
-**62 Tests, 6 Testdateien, alle grün** (`npm test`). Geprüft wurde gegen echte
+**63 Tests, 6 Testdateien, alle grün** (`npm test`). Geprüft wurde gegen echte
 HTTP-Server auf `127.0.0.1`, nicht gegen Attrappen im Arbeitsspeicher — die
 Netzwerk-, Streaming- und Fehlerpfade laufen also wirklich durch.
 

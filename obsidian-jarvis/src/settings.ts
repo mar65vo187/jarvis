@@ -749,6 +749,20 @@ export class JarvisSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Antworten live mitschreiben (Streaming)')
+      .setDesc(
+        'Normalerweise tippt die Antwort mit. Kann ein Dienst nicht direkt angefragt werden ' +
+          '(z. B. Ollama ohne OLLAMA_ORIGINS), holt Jarvis die Antwort automatisch am Stück — das funktioniert immer. ' +
+          'Ausschalten, wenn du grundsätzlich die fertige Antwort sehen willst.',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(settings.ui.stream).onChange(async (value) => {
+          settings.ui.stream = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
       .setName('Kostenschätzung anzeigen')
       .setDesc('Zeigt bei Cloud-Antworten eine grobe Preisschätzung (ohne Gewähr).')
       .addToggle((toggle) =>
