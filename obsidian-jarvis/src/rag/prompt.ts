@@ -64,6 +64,8 @@ export interface PromptInput {
   mode: AnswerMode;
   question: string;
   sources: Source[];
+  /** Gelerntes Wissen (Lektionen aus früheren Cloud-Antworten und Korrekturen). */
+  lessonCount?: number;
   customInstructions: string;
   language: string;
   vaultName?: string;
@@ -103,6 +105,15 @@ export function buildSystemPrompt(input: PromptInput): string {
     );
   }
 
+  if (input.lessonCount) {
+    parts.push(
+      'Zusätzlich bekommst du GELERNTES WISSEN ([W1], [W2] …) aus früheren, besseren Antworten und ' +
+        'Korrekturen des Nutzers. Behandle es als verbindlich: wenn es die Frage beantwortet, nutze es und ' +
+        'sag kurz, dass es aus deinem gelernten Wissen stammt. Bei Widerspruch zu den Notizen gilt das ' +
+        'gelernte Wissen nur dann, wenn es als Korrektur des Nutzers gekennzeichnet ist.',
+    );
+  }
+
   parts.push(
     'Wenn du etwas nicht sicher weißt, sage es. Erfinde keine Fakten, Zahlen, Quellen oder Aktionen. ' +
       'Du kannst den Vault nicht verändern, nichts versenden und nichts im Internet nachsehen, ' +
@@ -116,18 +127,33 @@ export function buildSystemPrompt(input: PromptInput): string {
   return parts.join('\n');
 }
 
-export function buildUserMessage(question: string, sources: Source[], mode: AnswerMode): string {
-  if (!sources.length) return question;
-  const blocks = sources.map(
-    (source) =>
-      `[${source.id}] ${source.path}${source.heading ? ` › ${source.heading}` : ''}\n${truncate(source.text, 6000)}`,
-  );
-  const header =
-    mode === 'note'
-      ? 'AUSZUG AUS DER GEÖFFNETEN NOTIZ:'
-      : 'NOTIZ-AUSSCHNITTE AUS DEM VAULT:';
-  return `${header}\n<<<QUELLEN\n${blocks.join('\n\n')}\nQUELLEN>>>\n\nAUFGABE:\n${question}\n\n` +
-    'Denke daran: Belege deine Aussagen mit [Q1], [Q2] usw. und sage, wenn der Ausschnitt nicht reicht.';
+export function buildUserMessage(
+  question: string,
+  sources: Source[],
+  mode: AnswerMode,
+  learned?: { text: string; count: number },
+): string {
+  const sections: string[] = [];
+  if (learned?.count) {
+    sections.push(`GELERNTES WISSEN (verbindlich, aus früheren Antworten und Korrekturen):\n<<<GELERNT\n${learned.text}\nGELERNT>>>`);
+  }
+  if (sources.length) {
+    const blocks = sources.map(
+      (source) =>
+        `[${source.id}] ${source.path}${source.heading ? ` › ${source.heading}` : ''}\n${truncate(source.text, 6000)}`,
+    );
+    const header = mode === 'note' ? 'AUSZUG AUS DER GEÖFFNETEN NOTIZ:' : 'NOTIZ-AUSSCHNITTE AUS DEM VAULT:';
+    sections.push(`${header}\n<<<QUELLEN\n${blocks.join('\n\n')}\nQUELLEN>>>`);
+  }
+  if (!sections.length) return question;
+  const reminder = [
+    sources.length ? 'Belege deine Aussagen mit [Q1], [Q2] usw.' : '',
+    learned?.count ? 'Nutze das gelernte Wissen und nenne es beim Namen ([W1], [W2]).' : '',
+    'Sage offen, wenn die Angaben nicht reichen.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return `${sections.join('\n\n')}\n\nAUFGABE:\n${question}\n\nDenke daran: ${reminder}`;
 }
 
 export function buildMessages(system: string, history: ChatMessage[], userContent: string, historyLimit: number): ChatMessage[] {

@@ -1,4 +1,5 @@
 /** Gemeinsame Typen für das Jarvis-AI-Plugin. */
+import type { LearningSettings } from './learn/types';
 
 export type CloudKind = 'openai' | 'anthropic' | 'gemini';
 
@@ -147,6 +148,7 @@ export interface JarvisSettings {
   local: LocalSettings;
   cloud: Record<CloudProviderId, CloudProviderSettings>;
   rag: RagSettings;
+  learning: LearningSettings;
   github: GithubSettings;
   ui: UiSettings;
   /** Zusätzliche Anweisungen vom Nutzer an das Modell. */

@@ -10,7 +10,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import * as obsidianMock from './mocks/obsidian';
-import { startServer, json, ndjson, type TestServer } from './helpers/server';
+import { startServer, json, ndjson, sse, type TestServer } from './helpers/server';
 
 /** Dieselbe TFile-Klasse, die auch das Bündel über "obsidian" bekommt. */
 const TFile = (obsidianMock as unknown as { TFile: new (path: string) => { path: string; stat: { mtime: number; size: number } } }).TFile;
@@ -20,6 +20,8 @@ interface LoadedPlugin {
     local: { baseUrl: string; defaultModel: string };
     routeMode: string;
     github: { owner: string };
+    rag: { excludeFolders: string[] };
+    learning: { enabled: boolean; saveMode: string };
   };
   brain: { models: (id: string, force?: boolean) => Promise<Array<{ id: string }>> };
   index: { stats: () => { chunks: number; files: number }; ensureFresh: (force: boolean) => Promise<unknown> };
@@ -27,10 +29,18 @@ interface LoadedPlugin {
     ask: (options: Record<string, unknown>) => Promise<{
       answer: { text: string; providerId: string; model: string };
       sources: Array<{ path: string; id: string }>;
+      lessons: Array<{ id: string; question: string }>;
+      learned?: { saved: boolean; id?: string; notePath?: string };
     }>;
   };
   listAllModels: () => Promise<Array<{ id: string; local: boolean }>>;
   testEverything: () => Promise<string[]>;
+  learning: { count: () => number; add: (input: Record<string, unknown>) => Promise<unknown>; list: () => unknown[] };
+  distiller: {
+    plan: () => { model: string; base: string };
+    run: (plan: unknown) => Promise<{ model: string; message: string }>;
+  };
+  learningReport: () => string[];
   onload: () => Promise<void>;
   onunload: () => void;
   loadData: () => Promise<unknown>;
@@ -149,6 +159,8 @@ function makeApp(files: Record<string, string>) {
 }
 
 let server: TestServer;
+const created: Array<{ model: string; modelfile: string }> = [];
+const deleted: Array<{ model: string }> = [];
 
 const NOTES = {
   'Projekt Alpha.md':
@@ -159,7 +171,14 @@ const NOTES = {
 beforeAll(async () => {
   server = await startServer((req, res) => {
     if (req.url === '/api/tags') {
-      json(res, 200, { models: [{ name: 'qwen3:8b', size: 5_000_000_000 }, { name: 'nomic-embed-text:latest' }] });
+      // Angelegte Profile erscheinen - wie bei echtem Ollama - in der Modellliste.
+      json(res, 200, {
+        models: [
+          { name: 'qwen3:8b', size: 5_000_000_000 },
+          { name: 'nomic-embed-text:latest' },
+          ...created.map((entry) => ({ name: entry.model })),
+        ],
+      });
       return;
     }
     if (req.url === '/api/embed') {
@@ -167,6 +186,33 @@ beforeAll(async () => {
       const payload = JSON.parse(server.requests.at(-1)?.body || '{}') as { input?: string[] };
       const inputs = payload.input ?? [];
       json(res, 200, { embeddings: inputs.map((_input, index) => [0.1 + index * 0.001, 0.2, 0.3]) });
+      return;
+    }
+    if (req.url === '/chat/completions') {
+      sse(res, [
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content:
+                  'Laut [Q1] endet Projekt Alpha am 15. November. Ansprechpartnerin ist Frau Berger, und die Zusage des Lieferanten fehlt noch.',
+              },
+            },
+          ],
+        }),
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 700, completion_tokens: 40 } }),
+      ]);
+      return;
+    }
+    if (req.url === '/api/create') {
+      const payload = JSON.parse(server.requests.at(-1)?.body as string) as { model: string; modelfile: string };
+      created.push(payload);
+      json(res, 200, { status: 'success' });
+      return;
+    }
+    if (req.url === '/api/delete') {
+      deleted.push(JSON.parse(server.requests.at(-1)?.body as string) as { model: string });
+      json(res, 200, { status: 'success' });
       return;
     }
     if (req.url === '/api/chat') {
@@ -254,6 +300,82 @@ describe('Ausgeliefertes Bündel main.js', () => {
     expect(report).toContain('— GitHub —');
     expect(report).toContain('— Wissen —');
     expect(report).toContain('2 Notizen');
+    plugin.onunload();
+  });
+
+  it('lernt aus einer Cloud-Antwort und legt das Gelernte als Notiz im Vault ab', async () => {
+    const { plugin: PluginClass } = loadBundle();
+    const { app, store } = makeApp(NOTES);
+    const plugin = new PluginClass(app, { id: 'jarvis-ai', version: '2.0.0' });
+    plugin.loadData = async () => ({
+      settings: {
+        local: { baseUrl: server.url, defaultModel: 'qwen3:8b' },
+        learning: { enabled: true, saveMode: 'auto', learnFrom: 'all', writeNotes: true, memoryFolder: 'Jarvis Gedächtnis' },
+        cloud: {
+          openai: { enabled: true, baseUrl: server.url, defaultModel: 'gpt-6-astra', kind: 'openai', label: 'GPT' },
+        },
+      },
+      keys: { 'jarvis-ai-openai': 'sk-test' },
+    });
+    plugin.saveData = async () => undefined;
+    await plugin.onload();
+
+    // Cloud-Antwort erzwingen -> Lernen
+    const result = await plugin.assistant.ask({
+      question: 'Wann endet Projekt Alpha und wer ist Ansprechpartnerin?',
+      mode: 'vault',
+      route: 'cloud',
+      history: [],
+    });
+    expect(result.answer.providerId).toBe('openai');
+    expect(result.learned?.saved).toBe(true);
+    expect(plugin.learning.count()).toBe(1);
+
+    // Gelerntes liegt als Notiz im Vault (geht damit ins GitHub-Backup)
+    const paths = [...store.keys()].filter((path) => path.startsWith('Jarvis Gedächtnis/'));
+    expect(paths).toHaveLength(1);
+    expect(store.get(paths[0])).toContain('jarvis-gelernt: true');
+    expect(result.learned?.notePath).toBe(paths[0]);
+
+    // Der Gedächtnisordner wird aus der Vault-Suche herausgehalten
+    expect(plugin.settings.rag.excludeFolders).toContain('Jarvis Gedächtnis');
+
+    // Zweite Frage: das Gelernte steckt im Prompt an das lokale Modell
+    const second = await plugin.assistant.ask({
+      question: 'Wann endet Projekt Alpha und wer ist Ansprechpartnerin?',
+      mode: 'vault',
+      route: 'local',
+      history: [],
+    });
+    expect(second.lessons).toHaveLength(1);
+    const sent = JSON.parse(server.requests.filter((request) => request.url === '/api/chat').at(-1)!.body) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(sent.messages.at(-1)!.content).toContain('GELERNTES WISSEN');
+
+    // Weitere gelernter Inhalt -> destillieren (echter Ollama-Aufruf an /api/create)
+    await plugin.learning.add({
+      question: 'Wer ist Ansprechpartnerin im Projekt Alpha?',
+      answer: 'Frau Berger ist die Ansprechpartnerin.',
+      provider: 'openai',
+      model: 'gpt-6-astra',
+      reason: 'escalation',
+      sources: [{ path: 'Projekt Alpha.md' }],
+    });
+    const plan = plugin.distiller.plan();
+    const outcome = await plugin.distiller.run(plan);
+    expect(outcome.model).toBe('jarvis-brain-v1');
+    expect(created).toHaveLength(1);
+    expect(created[0].model).toBe('jarvis-brain-v1');
+    expect(created[0].modelfile).toContain('FROM qwen3:8b');
+    expect(created[0].modelfile).toContain('MESSAGE user');
+    expect(created[0].modelfile).toContain('MESSAGE assistant');
+    expect(created[0].modelfile).toContain('SYSTEM');
+
+    // Bericht enthält den Lernstand
+    const report = plugin.learningReport().join('\n');
+    expect(report).toContain('Lektionen:');
+    expect(report).toContain('Qualitätsverlauf');
     plugin.onunload();
   });
 

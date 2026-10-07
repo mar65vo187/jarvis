@@ -22,6 +22,14 @@ export interface ChatTurn {
     buffered?: boolean;
     costUsd?: number;
     error?: string;
+    /** Qualitätsmaß: Quellenabdeckung der Antwort (0..1). */
+    coverage?: number;
+    /** Wenn eine schwache lokale Antwort durch die Cloud ersetzt wurde. */
+    upgradedFrom?: string;
+    /** ID der gelernten Lektion zu dieser Antwort. */
+    lessonId?: string;
+    /** Lokale Antwortqualität vor der Aufwertung. */
+    coverageBefore?: number;
   };
 }
 

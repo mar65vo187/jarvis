@@ -1,5 +1,7 @@
 /** Verbindet die reine Logik mit der echten Obsidian-Oberfläche. */
 import { App, TFile, TFolder, normalizePath } from 'obsidian';
+import type { JsonPersist } from './learn/store';
+import type { MemoryNoteFs } from './learn/notes';
 import type { VaultFileInfo, VaultReader, IndexPersist, Embedder } from './rag/vault-index';
 import type { VaultFileSystem } from './github/sync';
 import type { OllamaProvider } from './providers/ollama';
@@ -136,6 +138,101 @@ export class PluginIndexPersist implements IndexPersist {
     }
     await this.ensureFolder();
     await this.app.vault.adapter.write(this.path, text);
+  }
+}
+
+/** Beliebige JSON-Datei im Plugin-Ordner (z. B. der Lernspeicher). */
+export class ObsidianJsonFile implements JsonPersist {
+  constructor(
+    private app: App,
+    private path: string,
+  ) {}
+
+  private async ensureFolder(): Promise<void> {
+    const folder = normalizePath(this.path).split('/').slice(0, -1).join('/');
+    const adapter = this.app.vault.adapter;
+    if (folder && !(await adapter.exists(folder))) await adapter.mkdir(folder);
+  }
+
+  async read(): Promise<string | null> {
+    try {
+      const target = normalizePath(this.path);
+      if (!(await this.app.vault.adapter.exists(target))) return null;
+      return await this.app.vault.adapter.read(target);
+    } catch {
+      return null;
+    }
+  }
+
+  async write(text: string): Promise<void> {
+    await this.ensureFolder();
+    await this.app.vault.adapter.write(normalizePath(this.path), text);
+  }
+}
+
+/** Zugriff auf die gelernten Notizen im Vault. */
+export class ObsidianMemoryNoteFs implements MemoryNoteFs {
+  constructor(private app: App) {}
+
+  async ensureFolder(folder: string): Promise<void> {
+    const target = normalizePath(folder);
+    if (!(await this.app.vault.adapter.exists(target))) {
+      await this.app.vault.adapter.mkdir(target);
+    }
+  }
+
+  async write(path: string, content: string): Promise<void> {
+    const normalized = normalizePath(path);
+    const folder = normalized.split('/').slice(0, -1).join('/');
+    if (folder) await this.ensureFolder(folder);
+    const existing = this.app.vault.getAbstractFileByPath(normalized);
+    if (existing instanceof TFile) {
+      await this.app.vault.modify(existing, content);
+      return;
+    }
+    await this.app.vault.adapter.write(normalized, content);
+  }
+
+  async read(path: string): Promise<string | null> {
+    try {
+      const normalized = normalizePath(path);
+      const file = this.app.vault.getAbstractFileByPath(normalized);
+      if (file instanceof TFile) return await this.app.vault.cachedRead(file);
+      if (await this.app.vault.adapter.exists(normalized)) return await this.app.vault.adapter.read(normalized);
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async remove(path: string): Promise<void> {
+    const normalized = normalizePath(path);
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (file) {
+      await this.app.vault.delete(file);
+      return;
+    }
+    if (await this.app.vault.adapter.exists(normalized)) await this.app.vault.adapter.remove(normalized);
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    const folder = normalizePath(prefix);
+    const out: string[] = [];
+    const walk = (current: string): void => {
+      const entry = this.app.vault.getAbstractFileByPath(current);
+      if (entry instanceof TFolder) {
+        for (const child of entry.children) {
+          if (child instanceof TFile) out.push(child.path);
+          else if (child instanceof TFolder) walk(child.path);
+        }
+        return;
+      }
+      for (const file of this.app.vault.getFiles()) {
+        if (file.path === folder || file.path.startsWith(`${folder}/`)) out.push(file.path);
+      }
+    };
+    walk(folder);
+    return out;
   }
 }
 

@@ -25,6 +25,12 @@ function makeHost(overrides: Partial<JarvisChatHost> = {}) {
     notify: () => undefined,
     refreshIndex: async () => ({ files: 3, chunks: 9, embedded: 9, bytes: 0, updatedAt: 0, skipped: 0, embeddingModel: null }),
     activeNotePath: () => 'Aktuell.md',
+    learningStats: () => ({ lessons: 4, corrections: 1, avgLocalQuality: 0.72, avgCloudQuality: 0.88, improvement: 0.21, pending: 2 }),
+    saveLesson: async () => undefined,
+    rateLesson: async () => undefined,
+    correctLesson: async () => undefined,
+    distill: async () => 'jarvis-brain-v1 erstellt',
+    showLearningReport: () => undefined,
     assistant: {
       ask: async (options: Record<string, unknown>) => {
         askCalls.push(options);

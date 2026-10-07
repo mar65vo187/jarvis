@@ -79,6 +79,25 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     includeActiveNote: true,
     deepMode: false,
   },
+  learning: {
+    enabled: true,
+    memoryFolder: 'Jarvis Gedächtnis',
+    writeNotes: true,
+    saveMode: 'auto',
+    learnFrom: 'escalations',
+    qualityThreshold: 0.55,
+    maxLessons: 400,
+    injectLessons: 3,
+    injectChars: 4000,
+    autoDistillAfter: 0,
+    distillMaxExamples: 8,
+    systemHints: [],
+    distillBase: '',
+    distillVersion: 0,
+    lastDistillAt: '',
+    lastDistillModel: '',
+    qualityHistory: [],
+  },
   github: {
     enabled: false,
     owner: '',
@@ -123,6 +142,7 @@ export function mergeSettings(loaded: DeepPartial<JarvisSettings> | null | undef
     ...loaded,
     local: { ...base.local, ...(loaded.local ?? {}) },
     rag: { ...base.rag, ...(loaded.rag ?? {}) },
+    learning: { ...base.learning, ...(loaded.learning ?? {}) },
     github: { ...base.github, ...(loaded.github ?? {}) },
     ui: { ...base.ui, ...(loaded.ui ?? {}) },
     cloud: { ...base.cloud },
@@ -151,6 +171,11 @@ export interface SettingsHost {
   testEverything(): Promise<string[]>;
   indexStats(): { files: number; chunks: number; embedded: number; embeddingModel: string | null };
   resetIndex(): Promise<void>;
+  /** Lernsystem */
+  learningReport(): string[];
+  distillNow(): Promise<string>;
+  wipeLearning(): Promise<void>;
+  learningSnapshot(): { lessons: number; corrections: number; avgLocalQuality: number; avgCloudQuality: number; improvement: number; pending: number };
 }
 
 export class JarvisSettingTab extends PluginSettingTab {
@@ -170,6 +195,7 @@ export class JarvisSettingTab extends PluginSettingTab {
     this.renderLocal(containerEl);
     this.renderCloud(containerEl);
     this.renderVault(containerEl);
+    this.renderLearning(containerEl);
     this.renderGithub(containerEl);
     this.renderBehaviour(containerEl);
     this.renderDiagnose(containerEl);
@@ -536,6 +562,208 @@ export class JarvisSettingTab extends PluginSettingTab {
         button.setButtonText('Index neu aufbauen').onClick(async () => {
           await this.host.resetIndex();
           new Notice('Jarvis: Index gelöscht. Beim nächsten Aufruf wird neu gelesen.', 8000);
+        }),
+      );
+  }
+
+  // ------------------------------------------------------------- Lernen
+
+  private renderLearning(containerEl: HTMLElement): void {
+    containerEl.createEl('h3', { text: 'Lernen & Selbstverbesserung' });
+    const learning = this.host.settings.learning;
+    const snapshot = this.host.learningSnapshot();
+
+    containerEl.createEl('p', {
+      cls: 'setting-item-description',
+      text:
+        `Gelernt: ${snapshot.lessons} Lektion(en), davon ${snapshot.corrections} mit deiner Korrektur. ` +
+        `Qualität lokal im Schnitt ${Math.round(snapshot.avgLocalQuality * 100)} %` +
+        (snapshot.avgCloudQuality ? `, Cloud ${Math.round(snapshot.avgCloudQuality * 100)} %` : '') +
+        (snapshot.improvement ? `, Veränderung nach dem letzten Verbessern ${snapshot.improvement > 0 ? '+' : ''}${Math.round(snapshot.improvement * 100)} %` : '') +
+        `. ${snapshot.pending} neue Lektion(en) seit dem letzten Verbessern.`,
+    });
+
+    new Setting(containerEl)
+      .setName('Lernen aktiv')
+      .setDesc(
+        'Wenn die Cloud antwortet, speichert Jarvis die Antwort als Wissen und nutzt sie bei späteren Fragen — ' +
+          'die lokale KI braucht dadurch seltener die Cloud und antwortet besser.',
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(learning.enabled).onChange(async (value) => {
+          learning.enabled = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Wann merken?')
+      .setDesc(
+        'automatisch = sofort speichern · nachfragen = Knopf unter der Antwort · aus = nichts speichern. ' +
+          'Das Lernen ist keine Modell-Schulung: es sind gespeicherte Antworten und Regeln, die als Kontext dienen.',
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions({ auto: 'automatisch', ask: 'nachfragen', off: 'aus' })
+          .setValue(learning.saveMode)
+          .onChange(async (value) => {
+            learning.saveMode = value as 'auto' | 'ask' | 'off';
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Woraus lernen?')
+      .setDesc('Nur aus Ausweich-/Aufwertungs-Antworten (sparsam) oder aus jeder Cloud-Antwort (lernt mehr, kostet mehr Speicher).')
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions({ escalations: 'nur wenn lokal nicht reichte', all: 'aus jeder Cloud-Antwort' })
+          .setValue(learning.learnFrom)
+          .onChange(async (value) => {
+            learning.learnFrom = value as 'escalations' | 'all';
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Qualitätsschwelle')
+      .setDesc(
+        'Wie viel von dem, was in deinen Notizen steht, muss die lokale Antwort treffen (0–1)? ' +
+          'Darunter wertet Jarvis die Antwort auf (Cloud) und lernt daraus. Empfehlung: 0,5–0,6.',
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0.2, 0.9, 0.05)
+          .setValue(learning.qualityThreshold)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            learning.qualityThreshold = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Gelerntes als Notizen im Vault')
+      .setDesc('Jede Lektion wird zusätzlich als Markdown abgelegt — dadurch sichert GitHub sie automatisch mit und du kannst sie lesen/ändern.')
+      .addToggle((toggle) =>
+        toggle.setValue(learning.writeNotes).onChange(async (value) => {
+          learning.writeNotes = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Gedächtnisordner')
+      .setDesc('Ordner für die gelernten Notizen. Er wird bei der Vault-Suche nicht doppelt gelesen, aber bei GitHub gesichert.')
+      .addText((text) =>
+        text.setValue(learning.memoryFolder).onChange(async (value) => {
+          learning.memoryFolder = value.trim() || 'Jarvis Gedächtnis';
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Lektionen im Prompt')
+      .setDesc('Wie viele passende Lektionen die lokale KI mitgeschickt bekommt.')
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 8, 1)
+          .setValue(learning.injectLessons)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            learning.injectLessons = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Obergrenze gespeicherter Lektionen')
+      .setDesc('Bei Erreichen werden schlecht bewertete und ungenutzte Einträge zuerst entfernt.')
+      .addText((text) =>
+        text.setValue(String(learning.maxLessons)).onChange(async (value) => {
+          const parsed = Number.parseInt(value, 10);
+          if (Number.isFinite(parsed) && parsed >= 50) learning.maxLessons = parsed;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Automatisch verbessern (Destillieren)')
+      .setDesc(
+        'Nach so vielen neuen Lektionen wird automatisch ein neues lokales Ollama-Profil erstellt ' +
+          '(0 = aus). Es wird nur ein Profil angelegt — nichts heruntergeladen, keine Modellgewichte trainiert.',
+      )
+      .addText((text) =>
+        text.setValue(String(learning.autoDistillAfter)).onChange(async (value) => {
+          const parsed = Number.parseInt(value, 10);
+          learning.autoDistillAfter = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Beispiele im lokalen Modell')
+      .setDesc('Wie viele gelernte Frage/Antwort-Paare ins Profil geschrieben werden (mehr = klüger, aber größer).')
+      .addSlider((slider) =>
+        slider
+          .setLimits(1, 20, 1)
+          .setValue(learning.distillMaxExamples)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            learning.distillMaxExamples = value;
+            await this.save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Regeln aus Korrekturen')
+      .setDesc('Eine Regel pro Zeile. Diese Regeln sind im lokalen Modell fest eingebaut (und im Chat immer aktiv).')
+      .addTextArea((area) => {
+        area.setValue((learning.systemHints ?? []).join('\n')).onChange(async (value) => {
+          learning.systemHints = value.split('\n').map((line) => line.trim()).filter(Boolean);
+          await this.save();
+        });
+        area.inputEl.rows = 3;
+        return area;
+      });
+
+    new Setting(containerEl)
+      .setName('Aktionen')
+      .setDesc(
+        learning.distillVersion
+          ? `Aktuelles Lernmodell: ${learning.lastDistillModel || `jarvis-brain-v${learning.distillVersion}`}` +
+            (learning.lastDistillAt ? ` (${learning.lastDistillAt})` : '')
+          : 'Noch kein Lernmodell erstellt.',
+      )
+      .addButton((button) =>
+        button
+          .setButtonText('Jetzt verbessern')
+          .setCta()
+          .onClick(async () => {
+            button.setDisabled(true);
+            button.setButtonText('Arbeite …');
+            try {
+              const message = await this.host.distillNow();
+              new Notice(message, 15000);
+              this.display();
+            } catch (error) {
+              new Notice(`Verbessern fehlgeschlagen: ${(error as Error).message}`, 15000);
+            } finally {
+              button.setDisabled(false);
+              button.setButtonText('Jetzt verbessern');
+            }
+          }),
+      )
+      .addButton((button) =>
+        button.setButtonText('Verlauf anzeigen').onClick(() => {
+          this.showReport(this.host.learningReport(), 'Jarvis: was gelernt wurde');
+        }),
+      )
+      .addButton((button) =>
+        button.setWarning().setButtonText('Gelerntes löschen').onClick(async () => {
+          await this.host.wipeLearning();
+          new Notice('Gelerntes Wissen gelöscht (lokale Notizen bleiben erhalten, bis du sie löschst).', 10000);
+          this.display();
         }),
       );
   }

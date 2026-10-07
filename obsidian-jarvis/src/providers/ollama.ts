@@ -227,6 +227,30 @@ export class OllamaProvider implements Provider {
     return out;
   }
 
+  /** Neues Modellprofil anlegen (aus einem Modelfile). */
+  async createModel(model: string, modelfile: string): Promise<void> {
+    await postJson({
+      url: this.url('/api/create'),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, modelfile, stream: false }),
+      timeoutMs: 900_000,
+      retries: 0,
+    });
+  }
+
+  /** Modellprofil löschen. */
+  async deleteModel(model: string): Promise<void> {
+    await streamRequest({
+      url: this.url('/api/delete'),
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+      timeoutMs: 60_000,
+      retries: 0,
+      allowStream: false,
+    });
+  }
+
   async unload(model: string): Promise<void> {
     await postJson({
       url: this.url('/api/generate'),

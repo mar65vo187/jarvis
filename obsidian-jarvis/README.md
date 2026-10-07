@@ -1,298 +1,313 @@
-# Jarvis AI für Obsidian — lokal **und** online
+# Jarvis AI für Obsidian — lokal, online und lernfähig
 
-Ein KI-Assistent, der direkt in Obsidian lebt: Er kennt deine Notizen, antwortet
-mit Quellenangaben, kann komplett auf deinem Rechner laufen (Ollama) — und wenn du
-mehr Qualität brauchst, mit einem Klick die stärksten Cloud-Modelle benutzen.
-Dazu eine echte GitHub-Anbindung: dein Vault wird als Commits gesichert und kann
-auf einem zweiten Rechner wiederhergestellt werden.
+Ein KI-Assistent, der direkt in Obsidian lebt: Er kennt deine Notizen, antwortet mit
+Quellenangaben, kann komplett auf deinem Rechner laufen (Ollama) — und wenn er mehr
+Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antworten lernt
+er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
+ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
 | | |
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 1.0.1 |
+| **Version** | 2.0.0 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 63 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 92 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
-## 1. Was das Plugin kann
+## 1. Die drei Betriebsarten
 
-- **Drei Betriebsarten**: `🏠 Lokal` (nur dein Rechner), `⚡ Auto` (lokal, weicht bei
-  Bedarf automatisch auf ein Top-Modell aus), `☁️ Cloud` (immer bestes Modell).
-- **Fragen an deinen Vault** mit Quellenangaben. Die benutzten Notizen erscheinen
-  als anklickbare Verweise unter der Antwort — du kannst jede Aussage am Original prüfen.
-- **Aufgaben direkt aus Obsidian**: zusammenfassen, Aufgaben herausarbeiten, Text
-  verbessern, übersetzen, Plan erstellen, gegenprüfen, Arbeitsbereich „gründlich".
-- **Auswahl im Editor** erklären bzw. per Cloud-Modell überarbeiten und ersetzen.
-- **Hybride Wissenssuche**: Bedeutungssuche über ein lokales Embedding-Modell **plus**
-  Stichwortsuche (BM25). Ohne Embedding-Modell funktioniert es weiterhin per Stichwortsuche.
-- **Lokale Modelle** werden automatisch erkannt; Jarvis wählt selbst das stärkste installierte.
-- **Cloud-Modelle** über einen Schlüssel: Claude, GPT, Gemini, OpenRouter (oder jeder
-  OpenAI-kompatible Dienst wie Groq, DeepSeek, LM Studio, vLLM).
-- **GitHub-Sicherung**: ein Commit für den ganzen Vault, nur geänderte Dateien werden
-  übertragen; Wiederherstellung mit Vorschau-Dialog vor dem Schreiben.
-- **Kostenschätzung** pro Cloud-Antwort (grob, ohne Gewähr) und Tokenzahlen.
+| Modus | Was passiert | Wann sinnvoll |
+|---|---|---|
+| 🏠 **Lokal** | Nur Ollama auf deinem Rechner. Keine Daten verlassen den PC. | Vertrauliches, Alltagsfragen, kein Internet |
+| ⚡ **Auto** | Erst lokal. Ist die lokale Antwort zu schwach (oder läuft kein Modell), übernimmt automatisch ein Top-Cloud-Modell — **und Jarvis lernt daraus**. | Standardbetrieb: günstig, privat, wird mit der Zeit besser |
+| ☁️ **Cloud** | Immer das stärkste Modell (Claude Opus 5.5, GPT-6 Astra, Gemini 3.8 Flash, OpenRouter). | Schwere Aufgaben, in denen Qualität alles ist |
+
+---
+
+## 2. Lernfähig: wie die lokale KI besser wird
+
+Das ist der Kern von Version 2.0. Der Ablauf bei jeder Frage:
+
+```
+Frage
+  │
+  ├─ Wissenssuche im Vault        → Notiz-Ausschnitte  [Q1], [Q2] …
+  ├─ Gelerntes Wissen            → Lektionen          [W1], [W2] …
+  │
+  ├─ Lokale KI antwortet zuerst (privat, schnell, kostenlos)
+  │
+  ├─ Qualitätsmessung: Wie viel von dem, was in den Quellen steht,
+  │  kommt in der Antwort wirklich vor? (Quellenabdeckung in %)
+  │  Ausweich-Antworten ("Als KI-Modell kann ich …") werden erkannt.
+  │
+  ├─ Zu schwach? → Cloud-Modell übernimmt (Aufwertung)
+  │        └─ daraus wird gelernt: Antwort gespeichert, Qualität dokumentiert
+  │
+  └─ Beim nächsten Mal: das Gelernte steht im Prompt der lokalen KI
+     → sie antwortet besser → die Cloud wird seltener gebraucht
+```
+
+### Drei Ebenen des Lernens
+
+**1. Lernspeicher (sofort wirksam)**
+Jede gelernte Cloud-Antwort wird als „Lektion" gespeichert: Frage, Antwort, Herkunft
+(Modell), benutzte Notizen, Stichworte. Passende Lektionen gehen bei späteren Fragen als
+`[W1], [W2]` in den Prompt — die lokale KI antwortet damit so, wie es das starke Modell
+getan hat. Die Lektionen liegen doppelt:
+- `cache/learning.json` (schnell, im Plugin-Ordner)
+- **`Jarvis Gedächtnis/` als normale Markdown-Notizen im Vault** — dadurch nimmt die
+  GitHub-Sicherung sie automatisch mit. Du kannst sie lesen, ändern und löschen.
+
+**2. Korrekturen (verbindlich)**
+Wenn du eine Antwort korrigierst („Korrigieren"-Knopf), gilt ab dann deine Fassung: Sie
+wird bevorzugt zitiert, als Regel gespeichert und in das lokale Modell eingebaut.
+
+**3. Destillation (dauerhaft im lokalen Modell)**
+„Lernmodell bauen" (Knopf 🎓 oder Befehl) schreibt die besten gelernten Fragen/Antworten
+und deine Regeln in ein **neues Ollama-Modellprofil** — z. B. `jarvis-brain-v3` — und macht
+es zu deinem lokalen Standardmodell. Danach trägt dein lokales Modell das Gelernte
+permanent in sich, auch ohne dass Lektionen in den Prompt passen müssen.
+
+> **Ganz ehrlich:** Es werden dabei **keine Modellgewichte trainiert** und nichts
+> heruntergeladen. Ein echtes Finetuning ist auf einem normalen Rechner nicht seriös
+> machbar. Was hier passiert, ist das, was wirklich funktioniert und überprüfbar bleibt:
+> gespeichertes Wissen, verbindliche Regeln, Beispiel-Dialoge im Modellprofil, bessere
+> Quellenwahl und eine messbare Qualitätskurve. Alles ist nachvollziehbar, änderbar,
+> löschbar.
+
+### Was du siehst
+
+- Unter jeder Antwort: **Qualität in %** (Quellenabdeckung) und bei Aufwertung
+  „vorher 22 % → jetzt 91 %".
+- **🧠 gelernt** an Antworten, die als Wissen gespeichert wurden.
+- Knöpfe: **Hilfreich**, **Nicht hilfreich**, **Korrigieren** — dein Urteil steuert,
+  was bevorzugt verwendet und was nie wieder benutzt wird.
+- In der Kopfzeile: **„🧠 12 Lektion(en) · Qualität 78 % · 3 neu"**.
+- Bericht (Knopf 🧠 oder Befehl): Lektionen, Korrekturen, Qualitätsverlauf pro Frage,
+  Modellstatistik (Aufrufe, Fehler, Dauer).
+
+### Voreinstellungen fürs Lernen
+
+| Einstellung | Standard | Bedeutung |
+|---|---|---|
+| Lernen aktiv | an | alles abschaltbar |
+| Wann merken? | automatisch | `nachfragen` zeigt „🧠 Merken"-Knopf, `aus` speichert nichts |
+| Woraus lernen? | nur wenn lokal nicht reichte | sparsam; `aus jeder Cloud-Antwort` lernt mehr |
+| Qualitätsschwelle | 0,55 | darunter gilt die lokale Antwort als zu schwach (0,5–0,6 empfohlen) |
+| Lektionen im Prompt | 3 | mehr = stärkerer Effekt, längere Anfragen |
+| Gelerntes als Notizen | an | Markdown im Vault, inklusive GitHub-Sicherung |
+| Gedächtnisordner | `Jarvis Gedächtnis` | wird bei der Vault-Suche nicht doppelt gelesen |
+| Automatisch verbessern | aus | z. B. `25`: nach 25 neuen Lektionen entsteht automatisch ein neues Profil |
+| Beispiele im Modell | 8 | mehr Beispiele = größeres Profil, stärkerer Effekt |
+| Regeln aus Korrekturen | leer | eine Zeile pro Regel, fest im lokalen Modell |
+
+---
+
+## 3. Was das Plugin noch kann
+
+- **Fragen an den Vault** mit Quellenangaben `[Q1]` als anklickbare Verweise.
+- **Hybride Suche**: lokale Embeddings + Stichwortsuche (BM25) — funktioniert auch ohne
+  Embedding-Modell.
+- **Aufgaben aus Obsidian**: zusammenfassen, Aufgaben ableiten, Text verbessern,
+  übersetzen, Plan, Gegenprüfung, „gründlich" (Entwurf + Selbstprüfung).
+- **Auswahl im Editor** erklären bzw. per Cloud überarbeiten und direkt ersetzen.
 - **Private Notizen** (`ki-privat: true`) und ausgeschlossene Ordner werden nie gelesen.
+- **Kostenschätzung** pro Cloud-Antwort (grob, ohne Gewähr) und Tokenzahlen.
+- **GitHub**: Vault als echte Commits sichern, mit Vorschau wiederherstellen.
 
 ---
 
-## 2. Wie es arbeitet
+## 4. Installation
 
-```
-Deine Frage
-   │
-   ├─ Wissenssuche im Vault   →  passende Notiz-Abschnitte  (+ aktuell geöffnete Notiz)
-   │                                │
-   │                                └─ Vektoren (lokal)  +  Stichworte (BM25)
-   │
-   ├─ Prompt-Bau (deutsch, mit Quellen [Q1], [Q2] … und Regeln gegen Erfindungen)
-   │
-   └─ Modellwahl
-        🏠 Lokal  → Ollama auf deinem PC
-        ⚡ Auto   → erst lokal; wenn lokal fehlt/scheitert/unbrauchbar → Cloud
-        ☁️ Cloud  → Claude / GPT / Gemini / OpenRouter
-   │
-Streaming-Antwort mit Quellenangaben, Verlauf und Bedienknöpfen
-```
+### Weg A — über GitHub (empfohlen, mit Updates)
 
-**Ausweichen im Auto-Modus** passiert, wenn: lokal kein Modell läuft, Ollama nicht
-erreichbar ist, die lokale Antwort leer/unbrauchbar ist, oder die Aufgabe als groß
-erkannt wird (sehr lange Frage, sehr viel Kontext, typische Analyseaufträge).
-Im Protokoll unter der Antwort steht immer, welches Modell geantwortet hat.
+1. Community-Plugin **BRAT** installieren (Einstellungen → Community-Plugins → Durchsuchen → „BRAT").
+2. `Strg/Cmd+P` → **BRAT: Add a beta plugin for testing** → `mar65vo187/jarvis` → bestätigen.
+3. Einstellungen → Community-Plugins → **Jarvis AI (lokal + Top-Cloud)** aktivieren.
 
----
+### Weg B — Installationshelfer
 
-## 3. Installation
-
-### Weg A — über GitHub (empfohlen, mit automatischen Updates)
-
-1. In Obsidian das Community-Plugin **BRAT** installieren und aktivieren
-   (Einstellungen → Community-Plugins → Durchsuchen → „BRAT").
-2. `Strg/Cmd+P` → **BRAT: Add a beta plugin for testing**.
-3. `mar65vo187/jarvis` eingeben, Version wie vorgeschlagen lassen, bestätigen.
-4. Einstellungen → Community-Plugins → **Jarvis AI (lokal + Top-Cloud)** aktivieren.
-
-### Weg B — Installationshelfer (Windows / macOS / Linux)
-
-1. Den Ordner `obsidian-jarvis` dieses Projekts herunterladen (Code → Download ZIP)
-   und **vollständig entpacken**.
-2. Windows: `install\JARVIS-INSTALLIEREN.cmd` doppelklicken.
-   macOS/Linux: `./install/install.sh /pfad/zu/deinem/Vault`
-3. Der Helfer zeigt vorhandene Vaults an, sichert alte Dateien und kopiert
-   `main.js`, `manifest.json`, `styles.css` in `.obsidian/plugins/jarvis-ai/`.
-4. Obsidian neu laden, Plugin aktivieren.
+Ordner `obsidian-jarvis` herunterladen und entpacken.
+Windows: `install\JARVIS-INSTALLIEREN.cmd` doppelklicken.
+macOS/Linux: `./install/install.sh /pfad/zu/deinem/Vault`
 
 ### Weg C — von Hand
 
-1. Im Vault den Ordner `.obsidian/plugins/jarvis-ai/` anlegen.
-2. `main.js`, `manifest.json`, `styles.css` hineinkopieren (aus dem Release oder dem
-   Ordner `obsidian-jarvis`).
-3. Obsidian neu starten, Plugin aktivieren.
+`main.js`, `manifest.json`, `styles.css` nach `.obsidian/plugins/jarvis-ai/` kopieren,
+Obsidian neu laden, Plugin aktivieren.
 
-Nach der Installation: `Strg/Cmd+P` → **„Jarvis: Chat öffnen"** oder das ✨-Symbol
-in der Seitenleiste.
+Danach: `Strg/Cmd+P` → **„Jarvis: Chat öffnen"**.
 
 ---
 
-## 4. Einrichtung: lokal (Ollama)
+## 5. Einrichtung: lokal (Ollama)
 
-1. [Ollama installieren](https://ollama.com/download) und starten.
-2. Ein Modell laden, passend zu deinem Speicher:
+1. [Ollama](https://ollama.com/download) installieren und starten.
+2. Modell wählen (nach Speicher):
 
-   | Dein Rechner | Befehl | Größe | Bemerkung |
-   |---|---|---|---|
-   | 8 GB RAM, nur CPU | `ollama pull qwen3:4b` | ~2,6 GB | klein, schnell, einfache Aufgaben |
-   | 16 GB RAM | `ollama pull qwen3:8b` | ~5 GB | guter Allrounder |
-   | 16 GB RAM / GPU | `ollama pull gpt-oss:20b` | ~13 GB | starkes Denken, braucht Platz |
-   | 24 GB VRAM | `ollama pull qwen3.6:27b` | ~17 GB | stärkstes Einzelmodell |
-   | 32 GB RAM+ | `ollama pull qwen3:30b` | ~19 GB | schnell für seine Größe (MoE) |
+   | Rechner | Befehl | Größe |
+   |---|---|---|
+   | 8 GB RAM, nur CPU | `ollama pull qwen3:4b` | ~2,6 GB |
+   | 16 GB RAM | `ollama pull qwen3:8b` | ~5 GB |
+   | 16 GB RAM / GPU | `ollama pull gpt-oss:20b` | ~13 GB |
+   | 24 GB VRAM | `ollama pull qwen3.6:27b` | ~17 GB |
+   | 32 GB RAM+ | `ollama pull qwen3:30b` | ~19 GB |
 
-3. Für die Bedeutungssuche: `ollama pull nomic-embed-text` (~274 MB, sehr empfehlenswert).
+3. Für die Bedeutungssuche: `ollama pull nomic-embed-text` (~274 MB, sehr empfohlen).
 4. In Obsidian: Einstellungen → **Jarvis KI** → *Modelle laden* → Modell wählen.
-   Die Kontextgröße 8192 ist ein guter Start.
 
-> **Wichtig für den Desktop:** Damit Obsidian Ollama direkt anfragen darf, einmalig
-> die Umgebungsvariable `OLLAMA_ORIGINS=app://obsidian.md,http://localhost,http://127.0.0.1`
-> setzen und Ollama neu starten. Der Installationshelfer erledigt das für dich.
-> Falls es nicht gesetzt ist, holt Jarvis die Antwort automatisch ohne Streaming —
-> funktioniert also trotzdem, nur ohne Live-Tippen.
+> **Für Desktop-Obsidian:** einmalig `OLLAMA_ORIGINS=app://obsidian.md,http://localhost,http://127.0.0.1`
+> setzen und Ollama neu starten, damit live mitgeschrieben wird. Ohne diese Variable holt
+> Jarvis die Antwort automatisch am Stück — funktioniert trotzdem. Der Installer erledigt das.
 
 ---
 
-## 5. Einrichtung: Cloud (Top-Modelle)
+## 6. Einrichtung: Cloud (Top-Modelle)
 
-In den Einstellungen gibt es für jeden Anbieter einen Block. **Aktiv** einschalten,
-**API-Schlüssel** einfügen, fertig. Die Schlüssel liegen im Schlüsseltresor von
-Obsidian (ab Version 1.11) und nicht im Vault.
+**Aktiv** einschalten, **API-Schlüssel** einfügen, fertig. Schlüssel liegen im
+Schlüsseltresor von Obsidian (ab 1.11), nicht im Vault.
 
-| Anbieter | Modell (Vorschlag) | Schlüssel besorgen | Bemerkung |
+| Anbieter | Vorschlag | Schlüssel | Bemerkung |
 |---|---|---|---|
-| **Claude** (Anthropic) | `claude-opus-5-5` | console.anthropic.com | Führt die Qualitätslisten an, 1 Mio. Token Kontext. Bestes Ergebnis für schwere Aufgaben. |
-| | `claude-sonnet-5-5` | | Deutlich günstiger, sehr stark im Alltag. |
-| **GPT** (OpenAI) | `gpt-6-astra` | platform.openai.com | Stärkstes OpenAI-Modell. |
-| | `gpt-6-luna` | | Günstig und schnell für viel Text. |
-| **Gemini** (Google) | `gemini-3.8-flash` | aistudio.google.com | Sehr schnell, großzügiges Gratis-Kontingent. |
-| **OpenRouter** | `anthropic/claude-opus-5-5` u. a. | openrouter.ai/keys | Ein Schlüssel für fast alle Modelle. |
-| **Eigener Dienst** | z. B. `llama3.1:8b` | — | Alles, was `…/v1/chat/completions` spricht (LM Studio, vLLM, Groq, DeepSeek). |
+| **Claude** | `claude-opus-5-5` | console.anthropic.com | Führt die Qualitätslisten an — die beste Quelle zum Lernen |
+| | `claude-sonnet-5-5` | | günstiger, sehr stark |
+| **GPT** | `gpt-6-astra` | platform.openai.com | stärkstes OpenAI-Modell |
+| | `gpt-6-luna` | | günstig, für viel Text |
+| **Gemini** | `gemini-3.8-flash` | aistudio.google.com | sehr schnell, Gratis-Kontingent |
+| **OpenRouter** | `anthropic/claude-opus-5-5` u. a. | openrouter.ai/keys | ein Schlüssel, fast alle Modelle |
+| **Eigener Dienst** | z. B. `llama3.1:8b` | — | alles mit `/v1/chat/completions` (LM Studio, vLLM, Groq, DeepSeek) |
 
-Mit **„Modelle laden"** holt Jarvis die echte Liste deines Kontos — so funktioniert
-das Plugin auch dann, wenn sich Modellnamen ändern.
-
-**Kosten:** Unter jeder Cloud-Antwort steht eine grobe Schätzung. Für Dauerbetrieb
-ist `⚡ Auto` die beste Einstellung: Alltagsfragen bleiben lokal, teure Cloud-Modelle
-werden nur bei schwierigen Aufgaben benutzt.
+Mit **„Modelle laden"** holt Jarvis die echte Liste deines Kontos.
+Für Dauerbetrieb ist `⚡ Auto` ideal: Alltag lokal, Cloud nur wenn nötig — **und genau
+diese Cloud-Antworten machen deine lokale KI besser.**
 
 ---
 
-## 6. Bedienung
+## 7. Bedienung
 
 **Befehls-Palette** (`Strg/Cmd+P`):
 
 | Befehl | Wirkung |
 |---|---|
-| Jarvis: Chat öffnen | Chat im rechten Bereich öffnen |
-| Jarvis: Diese Notiz zusammenfassen (lokal) | Zusammenfassung ohne Cloud |
-| Jarvis: Diese Notiz zusammenfassen (bestes Cloud-Modell) | Zusammenfassung mit Top-Modell |
+| Jarvis: Chat öffnen | Chat im rechten Bereich |
+| Jarvis: Diese Notiz zusammenfassen (lokal / Cloud) | je nach gewünschter Qualität |
 | Jarvis: Aufgaben aus dieser Notiz ableiten | Aufgabenliste `- [ ]` |
-| Jarvis: Markierten Text erklären/verbessern | Auswahl geht als Frage in den Chat |
-| Jarvis: Auswahl mit Cloud-Modell überarbeiten und ersetzen | ersetzt die Auswahl direkt |
-| Jarvis: Frage an meinen Vault stellen | Chat mit leerem Eingabefeld |
+| Jarvis: Markierten Text erklären/verbessern | Auswahl als Frage |
+| Jarvis: Auswahl mit Cloud-Modell überarbeiten und ersetzen | ersetzt direkt |
+| Jarvis: Lernen: Was hat Jarvis gelernt? | Bericht mit Qualitätsverlauf |
+| Jarvis: Lernen: Lokales Modell aus Gelerntem verbessern | Destillation starten |
+| Jarvis: Lernen: Gelerntes als Notizen ablegen | Markdown-Dateien nachziehen |
+| Jarvis: Lernen: Gelerntes Wissen löschen | Lernspeicher leeren |
 | Jarvis: Wissensindex neu aufbauen | Notizen neu einlesen |
-| Jarvis: Lokales Modell aus dem Speicher entladen | gibt RAM frei |
-| Jarvis: Vault jetzt sichern | GitHub-Sicherung mit Vorschau |
-| Jarvis: Vault wiederherstellen (Vorschau) | GitHub → Vault, mit Vorschaudialog |
-| Jarvis: Verbindungen testen | Diagnosebericht für Ollama, Cloud, GitHub |
+| Jarvis: Lokales Modell aus dem Speicher entladen | RAM freigeben |
+| Jarvis: Vault jetzt sichern / wiederherstellen | GitHub mit Vorschau |
+| Jarvis: Verbindungen testen | Diagnosebericht |
 
-**Im Chat:** Modus links oben (Lokal/Auto/Cloud), daneben dein Modell. Unten
-„Was soll Jarvis tun?" (Vault-Frage, freies Gespräch, Zusammenfassen, Aufgaben,
-Verbessern, Übersetzen, Plan, Gegenprüfung, gründlich) und die Option *geöffnete
-Notiz einbeziehen*. Antworten haben Knöpfe: **Kopieren**, **In Notiz einfügen**,
-**Neue Notiz**, **Besser machen (Cloud)**.
-
-Neue Notizen aus Antworten landen im Ordner `Jarvis-Ausgaben` (einstellbar).
+**Im Chat:** Modus (Lokal/Auto/Cloud), Modellwahl, Aufgabe (Vault-Frage, Gespräch,
+Zusammenfassen, Aufgaben, Verbessern, Übersetzen, Plan, Gegenprüfung, gründlich),
+„geöffnete Notiz einbeziehen". Antwort-Knöpfe: Kopieren, In Notiz einfügen, Neue Notiz,
+Besser machen (Cloud), Hilfreich, Nicht hilfreich, Korrigieren.
+Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ---
 
-## 7. GitHub-Anbindung (Sichern und Wiederherstellen)
+## 8. GitHub-Anbindung
 
 ### Einmal einrichten
 
-1. Auf GitHub ein **neues Repository** anlegen — am besten **privat**, z. B. `mein-vault`.
-2. Feingranularen Token erstellen: <https://github.com/settings/personal-access-tokens>
-   - *Repository access*: nur dieses Repository
-   - *Permissions* → **Contents: Read and write**
-3. In Obsidian: Einstellungen → **Jarvis KI** → Abschnitt **GitHub**
-   - *GitHub-Sicherung aktiv* ✅
-   - **Owner** (dein Benutzername), **Repository** (Name), **Branch** (`main`)
-   - **GitHub-Token** einfügen
-   - *Unterordner im Repository*: leer lassen oder z. B. `vault`
-4. **Verbindung testen** → muss „✅ Verbunden" melden.
-5. **Jetzt sichern** → es erscheint eine Vorschau (neu / geändert / gelöscht) und
-   danach ein einziger Commit.
+1. Auf GitHub ein **privates Repository** anlegen, z. B. `mein-vault`.
+2. Feingranularen Token erstellen (<https://github.com/settings/personal-access-tokens>):
+   *Repository access* = nur dieses Repo, **Contents: Read and write**.
+3. Einstellungen → **Jarvis KI** → **GitHub**: aktiv, Owner, Repository, Branch (`main`),
+   Token einfügen → **Verbindung testen** → **Jetzt sichern** (mit Vorschau).
 
-### Wie gesichert wird
+### Verhalten
 
-- Ein Commit pro Sicherung, mit Datum und Anzahl der Dateien.
-- Nur geänderte Dateien werden hochgeladen (Vergleich über den Git-Hash) — große
-  Vaults sind dadurch schnell.
-- Standard: **nur Markdown-Notizen**. Anhänge lassen sich zuschalten, kosten aber
-  viel Übertragung.
-- Ausgeschlossen sind immer: `.git`, `.trash`, `node_modules`, der Plugin-Zwischenspeicher.
-- Zusätzliche Ausschlüsse (Ordner oder Dateinamen) kannst du selbst eintragen.
-- **Automatik**: „Automatisch sichern (Minuten)" (z. B. 60) und/oder „Nach Änderungen
-  sichern" (sammelt Änderungen, frühestens alle 5 Minuten ein Commit).
+- Ein Commit pro Sicherung, nur geänderte Dateien (Git-Hash-Vergleich).
+- Immer ausgeschlossen: `.git`, `.trash`, `node_modules`, Plugin-Zwischenspeicher.
+- Standard: nur Markdown — **die gelernten Notizen und der Vault-Index sind dadurch mit
+  dabei** und überleben Rechnerwechsel und Neuinstallation.
+- Automatik: Zeitplan (Minuten) und/oder „nach Änderungen" (frühestens alle 5 Minuten).
+- Wiederherstellen zeigt erst die Dateiliste und schreibt nur Unterschiede.
 
-### Wiederherstellen
-
-„Vault wiederherstellen (Vorschau)" zeigt erst die Liste der Dateien und schreibt
-dann nur, was sich unterscheidet. Lokale Dateien, die in GitHub fehlen, bleiben
-erhalten — außer du schaltest *Beim Wiederherstellen lokale Dateien löschen* ein.
-So ziehst du deinen Vault auf einen zweiten Rechner.
-
-> Hinweis: Der Vault wird **nicht** automatisch synchron gehalten wie bei Obsidian
-> Sync. Es ist eine versionierte Sicherung plus Wiederherstellung — genau das, was
-> gegen Datenverlust und für den Zweitrechner hilft. Konflikte kann es dadurch nicht
-> geben, weil immer du entscheidest, wann gesichert oder geholt wird.
+> Der Vault wird nicht automatisch live synchronisiert wie bei Obsidian Sync — es ist
+> eine versionierte Sicherung mit Wiederherstellung, und du entscheidest wann.
 
 ---
 
-## 8. Datenschutz und Daten
+## 9. Datenschutz und Daten
 
-- **Lokal-Modus**: keine Inhalte verlassen den Rechner. Alle Anfragen gehen an
-  `127.0.0.1:11434` (Ollama).
-- **Cloud-Modus**: Es werden nur die Nachricht plus die ausgewählten Notiz-Ausschnitte
-  übertragen. Kein Vault-Upload, keine automatische Weitergabe des Verlaufs.
-- Notizen mit `ki-privat: true` (oder `jarvis-privat: true`) werden nie gelesen.
-- Der Wissensindex liegt als Datei unter `.obsidian/plugins/jarvis-ai/cache/` und
-  enthält Textausschnitte deiner Notizen — beim GitHub-Backup wird er ausgelassen.
-- Chatverlauf liegt in der Plugin-Datei `data.json` (letzte 25 Unterhaltungen).
-- API-Schlüssel: Obsidian-Schlüsseltresor, sonst `data.json` (dann unverschlüsselt —
-  die Einstellungen sagen dir, welcher Fall gilt).
+- **Lokal-Modus**: alles bleibt auf `127.0.0.1` (Ollama).
+- **Cloud-Modus**: übertragen werden nur die Nachricht, die ausgewählten Notiz-Ausschnitte
+  und passende Lektionen — kein Vault-Upload, kein Verlauf.
+- Notizen mit `ki-privat: true` werden nie gelesen.
+- Gelerntes liegt in `cache/learning.json` **und** als Markdown im konfigurierten
+  Gedächtnisordner (dadurch in GitHub-Backups enthalten).
+- API-Schlüssel im Obsidian-Schlüsseltresor, sonst in `data.json` (die Einstellungen
+  sagen dir, welcher Fall gilt).
 
 ---
 
-## 9. Wenn etwas nicht klappt
+## 10. Wenn etwas nicht klappt
 
-| Symptom | Ursache / Lösung |
+| Symptom | Lösung |
 |---|---|
-| „Keine Verbindung … Dienst läuft nicht" | Ollama starten (`ollama serve` oder App). Adresse prüfen: `http://127.0.0.1:11434`. |
-| Lokale Antworten dauern beim ersten Mal sehr lange | Das Modell wird geladen. „Modell im Speicher halten" auf `30m` setzen, oder kleineres Modell wählen. |
-| Antwort kommt erst am Ende (kein Live-Tippen) | `OLLAMA_ORIGINS` nicht gesetzt — siehe Abschnitt 4; Antwort funktioniert trotzdem. |
-| „Zugang abgelehnt (401/403)" | Schlüssel falsch/eingeschränkt. Bei GitHub: Contents = Read and write. |
-| „Limit erreicht (429)" | Kontingent erschöpft — kurz warten oder anderes Modell. |
-| „Modell nicht gefunden (404)" | In den Einstellungen *Modelle laden* und ein vorhandenes Modell auswählen. |
-| Wissenssuche findet nichts | Index neu aufbauen, ausschließende Ordner prüfen, konkrete Stichworte aus der Notiz nennen. `ollama pull nomic-embed-text` verbessert die Treffer deutlich. |
-| Cloud-Knopf fehlt | Mindestens einen Cloud-Anbieter auf *Aktiv* setzen und Schlüssel eintragen. |
-| GitHub: „Branch existiert noch nicht" | Normal beim ersten Mal — die Sicherung legt ihn an. |
-| Wiederherstellen bricht ab | Branch/Repo/Token prüfen; Vorschau zeigt die Ursache. |
+| „Keine Verbindung … Dienst läuft nicht" | Ollama starten; Adresse `http://127.0.0.1:11434` prüfen |
+| Erste lokale Antwort dauert lange | Modell wird geladen — „Modell im Speicher halten" auf `30m` |
+| Antwort kommt erst am Ende | `OLLAMA_ORIGINS` setzen (Abschnitt 5) — funktioniert trotzdem |
+| Lokale Antworten bleiben schwach | Qualitätsschwelle prüfen, Lektionen ansehen, „Lernmodell bauen", ggf. größeres Basismodell |
+| „Verbessern nicht möglich" | Es braucht mindestens eine geeignete Lektion (Antwort ≥ 40 Zeichen, nicht als schlecht bewertet) |
+| `jarvis-brain-vX` erscheint nicht | Ollama aktualisieren; der Diagnosebericht sagt es dir |
+| 401/403 | Schlüssel prüfen; bei GitHub Contents = Read and write |
+| 429 | Kontingent erschöpft — warten oder Modell wechseln |
+| Wissenssuche findet nichts | Index neu aufbauen, Ausschlüsse prüfen, `ollama pull nomic-embed-text` |
+| Gelerntes versehentlich drin | „Lernen: Was hat Jarvis gelernt?" → schlecht bewerten oder löschen; Markdown-Notiz direkt bearbeiten/löschen |
 
-**Diagnose:** Einstellungen → Jarvis KI → *Alle Verbindungen prüfen* zeigt Ollama,
-Cloud-Anbieter, GitHub und den Indexstand in einem Bericht.
-
----
-
-## 10. Grenzen (ehrlich gesagt)
-
-- Das Plugin trainiert **kein** Modell. Es lenkt vorhandene Modelle mit deinem
-  Notizwissen. Kleine lokale Modelle bleiben kleinen lokalen Modellen — die
-  Cloud-Modelle sind deutlich klüger, kosten aber Geld.
-- Quellenangaben sind Belege für benutzten Kontext, kein Beweis für jede Aussage.
-  Bei wichtigen Entscheidungen am Original prüfen.
-- Nur Markdown-Notizen werden gelesen. PDFs, Bilder oder Anhänge nicht.
-- Kein Internet-Zugriff für das Modell, keine Kalender-/Mail-Aktionen, kein
-  selbstständiges Arbeiten bei geschlossenem Obsidian.
-- GitHub-Sicherung ist eine Sicherung, kein Live-Sync.
-- Die automatischen Tests laufen gegen nachgebaute Anbieter-Schnittstellen
-  (echte HTTP-Server, echte Git-Objekt-Hashes). Der erste echte Aufruf findet auf
-  deinem Rechner statt — dafür ist der Verbindungstest da. Details: [PRUEFBERICHT.md](PRUEFBERICHT.md).
+**Diagnose:** Einstellungen → Jarvis KI → *Alle Verbindungen prüfen*.
 
 ---
 
-## 11. Für Entwickler
+## 11. Grenzen (ehrlich)
+
+- **Kein Trainieren von Modellgewichten.** Das Lernen sind gespeicherte Antworten,
+  Regeln und Beispiel-Dialoge im Modellprofil. Ein kleines lokales Modell bleibt dadurch
+  spürbar besser für *deine* Themen, aber nicht so klug wie ein Cloud-Modell.
+- Die Qualitätsmessung (Quellenabdeckung) ist ein **Signal, keine Wahrheit**. Sie erkennt
+  zuverlässig fehlende Kernaussagen und Ausweich-Floskeln, aber keine inhaltlichen Fehler
+  in schöner Formulierung. Deshalb gibt es Bewerten und Korrigieren.
+- Nur Markdown-Notizen werden gelesen (keine PDFs/Bilder).
+- Kein Internet-Zugriff für das Modell, keine Kalender-/Mail-Aktionen, kein Arbeiten bei
+  geschlossenem Obsidian.
+- GitHub ist eine Sicherung, kein Live-Sync.
+
+---
+
+## 12. Für Entwickler
 
 ```bash
 cd obsidian-jarvis
-npm install
-npm run typecheck   # TypeScript prüfen
-npm test            # 63 Tests (Anbieter, Routing, Index, GitHub, Oberfläche, fertiges Bündel)
+npm ci
+npm run typecheck   # TypeScript strict
+npm test            # 92 Tests; baut vorher automatisch das Bündel
 npm run build       # erzeugt main.js
 ```
 
-Aufbau:
-
 ```
 src/
-  main.ts                Plugin-Einstieg, Befehle, GitHub-Automatik, Diagnose
+  main.ts                Plugin-Einstieg, Befehle, GitHub-Automatik, Destillation, Diagnose
   brain.ts               Modellwahl, Presets, automatisches Ausweichen
   settings.ts            Einstellungen + Oberfläche
   providers/             ollama | openai-compat | anthropic | gemini
-  rag/                   vault-index.ts (Suche), prompt.ts (Prompts)
-  chat/                  view.ts (Oberfläche), assistant.ts (Ablauf), session.ts
+  rag/                   vault-index.ts (Suche), prompt.ts (Prompts inkl. Lektionen)
+  learn/                 types.ts, quality.ts (Messung), store.ts (Lernspeicher),
+                         distill.ts (Ollama-Profil), notes.ts (Markdown im Vault)
+  chat/                  view.ts (Oberfläche), assistant.ts (Ablauf + Aufwertung + Lernen), session.ts
   github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
-  obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings
-tests/                   Tests inkl. nachgebauter Obsidian-Schnittstelle
+  obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
+tests/                   92 Tests in 8 Dateien inkl. Ende-zu-Ende-Test auf main.js
 ```
 
-Beitragen ist willkommen — bitte `npm run check` laufen lassen.
+Beitragen: bitte `npm run typecheck && npm test` grün halten.

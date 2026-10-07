@@ -1,10 +1,12 @@
 /** Die Chat-Oberfläche im Obsidian-Fenster. */
-import { App, ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { App, ItemView, MarkdownRenderer, Modal, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import type { ChatMessage, JarvisSettings, ModelInfo, ProviderId, RouteMode } from '../types';
 import type { Brain } from '../brain';
 import type { IndexStats, VaultIndex } from '../rag/vault-index';
 import type { Assistant } from './assistant';
 import type { ChatSession, ChatTurn, SessionStore } from './session';
+import type { PendingLesson } from './assistant';
+import type { Lesson } from '../learn/types';
 import type { AnswerMode } from '../rag/prompt';
 import { MODE_LABELS } from '../rag/prompt';
 import { estimateCostUsd, estimateTokens, formatCost, formatDuration, sanitizeModelOutput } from '../util/format';
@@ -25,6 +27,13 @@ export interface JarvisChatHost {
   notify(message: string, timeout?: number): void;
   refreshIndex(force: boolean): Promise<IndexStats>;
   activeNotePath(): string | undefined;
+  /** Lernsystem */
+  learningStats(): { lessons: number; corrections: number; avgLocalQuality: number; avgCloudQuality: number; improvement: number; pending: number };
+  saveLesson(payload: PendingLesson): Promise<void>;
+  rateLesson(id: string, rating: Lesson['rating']): Promise<void>;
+  correctLesson(id: string, correction: string): Promise<void>;
+  distill(): Promise<string>;
+  showLearningReport(): void;
 }
 
 const MODE_CHOICES: AnswerMode[] = ['vault', 'chat', 'note', 'summarize', 'tasks', 'rewrite', 'translate', 'plan', 'critique', 'deep'];
@@ -140,6 +149,24 @@ export class JarvisChatView extends ItemView {
       }
       this.updateStatus();
     };
+
+    const learnButton = bar.createEl('button', { cls: 'jarvis-icon-button', attr: { title: 'Aus Gelerntem ein besseres lokales Modell bauen' } });
+    setIcon(learnButton, 'graduation-cap');
+    learnButton.onclick = async () => {
+      learnButton.disabled = true;
+      try {
+        await this.host.distill();
+      } catch (error) {
+        new Notice(`Verbessern nicht möglich: ${(error as Error).message}`, 15000);
+      } finally {
+        learnButton.disabled = false;
+        this.updateStatus();
+      }
+    };
+
+    const reportButton = bar.createEl('button', { cls: 'jarvis-icon-button', attr: { title: 'Was hat Jarvis gelernt?' } });
+    setIcon(reportButton, 'brain');
+    reportButton.onclick = () => this.host.showLearningReport();
 
     const settingsButton = bar.createEl('button', { cls: 'jarvis-icon-button', attr: { title: 'Jarvis-Einstellungen' } });
     setIcon(settingsButton, 'settings');
@@ -298,6 +325,13 @@ export class JarvisChatView extends ItemView {
     bits.push(
       `Index: ${stats.files} Notizen / ${stats.chunks} Abschnitte${stats.embeddingModel ? ` · ${stats.embeddingModel}` : ''}`,
     );
+    const learning = this.host.learningStats();
+    if (settings.learning.enabled) {
+      bits.push(
+        `🧠 ${learning.lessons} Lektion(en)${learning.avgLocalQuality ? ` · Qualität ${Math.round(learning.avgLocalQuality * 100)} %` : ''}` +
+          (learning.pending ? ` · ${learning.pending} neu` : ''),
+      );
+    }
     this.statusEl.setText(bits.join('  ·  '));
 
     for (const button of Array.from(this.contentEl.querySelectorAll<HTMLElement>('.jarvis-route-button'))) {
@@ -378,6 +412,10 @@ export class JarvisChatView extends ItemView {
     }
     if (meta.escalated) bits.push('auf Cloud ausgewichen');
     if (meta.buffered) bits.push('ohne Streaming (CORS-Ersatzweg)');
+    if (meta.coverage !== undefined) {
+      bits.push(`Qualität ${Math.round(meta.coverage * 100)} %${meta.coverageBefore !== undefined ? ` (vorher ${Math.round(meta.coverageBefore * 100)} %)` : ''}`);
+    }
+    if (meta.lessonId) bits.push('🧠 gelernt');
     line.setText(bits.filter(Boolean).join('  ·  '));
   }
 
@@ -424,6 +462,33 @@ export class JarvisChatView extends ItemView {
         await this.reRun(turn, 'cloud');
       }, 'Dieselbe Frage mit dem stärksten Cloud-Modell erneut stellen');
     }
+    if (turn.meta?.lessonId) {
+      makeButton('Hilfreich', 'thumbs-up', async () => {
+        await this.host.rateLesson(turn.meta!.lessonId!, 'good');
+      }, 'Diese gelernte Antwort soll bevorzugt verwendet werden');
+      makeButton('Nicht hilfreich', 'thumbs-down', async () => {
+        await this.host.rateLesson(turn.meta!.lessonId!, 'bad');
+      }, 'Diese gelernte Antwort nicht mehr verwenden');
+      makeButton('Korrigieren', 'pencil', async () => {
+        const correction = await promptForCorrection(this.host.app, turn.content);
+        if (correction === null) return;
+        await this.host.correctLesson(turn.meta!.lessonId!, correction);
+        await this.reRun(turn, this.host.settings.routeMode);
+      }, 'Deine Fassung wird verbindlich und fließt ins lokale Modell ein');
+    }
+  }
+
+  /** Vorschlag zum Merken (Einstellung "nachfragen"). */
+  private renderPendingLesson(container: HTMLElement, payload: PendingLesson): void {
+    const row = container.createDiv({ cls: 'jarvis-actions jarvis-pending' });
+    row.createSpan({ cls: 'jarvis-hint', text: 'Aus dieser Antwort lernen?' });
+    const yes = row.createEl('button', { cls: 'jarvis-action mod-cta', text: '🧠 Merken' });
+    yes.onclick = async () => {
+      await this.host.saveLesson(payload);
+      row.remove();
+    };
+    const no = row.createEl('button', { cls: 'jarvis-action', text: 'Nicht merken' });
+    no.onclick = () => row.remove();
   }
 
   // --------------------------------------------------------------- Senden
@@ -477,6 +542,7 @@ export class JarvisChatView extends ItemView {
 
     let streamed = '';
     let lastPaint = 0;
+    let upgradeReason = '';
     const onDelta = (chunk: string) => {
       streamed += chunk;
       const now = Date.now();
@@ -500,6 +566,13 @@ export class JarvisChatView extends ItemView {
         preferredModel: this.preferredModel(),
         onDelta,
         signal: this.controller.signal,
+        onUpgradeStart: (reason) => {
+          upgradeReason = reason;
+          streamed = '';
+          body.empty();
+          thinking.setText(`Die lokale Antwort war unvollständig (${reason}) — das Cloud-Modell übernimmt …`);
+          this.scrollToBottom();
+        },
       });
 
       thinking.remove();
@@ -509,6 +582,7 @@ export class JarvisChatView extends ItemView {
       const sources = result.sources.map((source) => ({ id: source.id, path: source.path, heading: source.heading }));
       if (sources.length) this.renderSources(bubble, sources);
 
+      void upgradeReason;
       const inputTokens = result.answer.usage?.inputTokens ?? estimateTokens(result.system + result.userMessage);
       const outputTokens = result.answer.usage?.outputTokens ?? estimateTokens(finalText);
       const costUsd = estimateCostUsd(result.answer.model, inputTokens, outputTokens);
@@ -527,11 +601,16 @@ export class JarvisChatView extends ItemView {
           escalated: result.answer.escalated,
           buffered: result.answer.buffered,
           costUsd,
+          coverage: result.quality?.cloud?.coverage ?? result.quality?.local.coverage,
+          coverageBefore: result.replacedLocalAnswer ? result.quality?.local.coverage : undefined,
+          upgradedFrom: result.replacedLocalAnswer,
+          lessonId: result.learned?.id,
         },
       };
       host.sessions.addTurn(turn);
       this.renderMeta(bubble, turn);
       this.renderActions(bubble, turn);
+      if (result.pendingLesson) this.renderPendingLesson(bubble, result.pendingLesson);
 
       if (result.notice) {
         bubble.createDiv({ cls: 'jarvis-hint', text: result.notice });
@@ -629,6 +708,40 @@ export class JarvisChatView extends ItemView {
     this.inputEl.value = text;
     this.inputEl.focus();
   }
+}
+
+/** Kleiner Dialog für eine Korrektur. Gibt null zurück, wenn abgebrochen wird. */
+export async function promptForCorrection(app: App, currentAnswer: string): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    const modal = new (class extends Modal {
+      onOpen(): void {
+        const { contentEl } = this;
+        contentEl.createEl('h3', { text: 'Wie lautet die richtige Antwort?' });
+        contentEl.createEl('p', {
+          cls: 'setting-item-description',
+          text:
+            'Deine Fassung wird verbindlich: Jarvis verwendet sie bei künftigen Fragen und baut sie beim ' +
+            'Verbessern des lokalen Modells ein.',
+        });
+        const area = contentEl.createEl('textarea', { cls: 'jarvis-input' });
+        area.rows = 8;
+        area.value = currentAnswer.slice(0, 4000);
+        const row = contentEl.createDiv({ cls: 'jarvis-modal-buttons' });
+        const save = row.createEl('button', { cls: 'mod-cta', text: 'Korrektur speichern' });
+        save.onclick = () => {
+          const value = area.value.trim();
+          this.close();
+          resolve(value || null);
+        };
+        const cancel = row.createEl('button', { text: 'Abbrechen' });
+        cancel.onclick = () => {
+          this.close();
+          resolve(null);
+        };
+      }
+    })(app);
+    modal.open();
+  });
 }
 
 export type { JarvisSettings };

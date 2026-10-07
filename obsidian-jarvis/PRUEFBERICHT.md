@@ -1,137 +1,197 @@
-# Prüfbericht — Jarvis AI für Obsidian 1.0.1
+# Prüfbericht — Jarvis AI für Obsidian 2.0.0
 
 Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
-(`main.js` aus diesem Ordner).
+(`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
+**was nicht** — ohne Beschönigung.
 
-## Was automatisiert geprüft wurde
+## Kurzfassung
 
-**63 Tests, 6 Testdateien, alle grün** (`npm test`). Geprüft wurde gegen echte
-HTTP-Server auf `127.0.0.1`, nicht gegen Attrappen im Arbeitsspeicher — die
-Netzwerk-, Streaming- und Fehlerpfade laufen also wirklich durch.
+**92 Tests in 8 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
+Geprüft wurde gegen echte HTTP-Server auf `127.0.0.1` (kein Attrappen-Netzwerk), mit
+echten Git-Objekt-Hashes, echtem DOM und einem Ende-zu-Ende-Test auf der ausgelieferten
+Datei `main.js`. TypeScript läuft im `strict`-Modus fehlerfrei.
 
-### Anbieter (`tests/providers.test.ts`, 11 Tests)
+Gefundene und **behobene** Fehler während der Entwicklung: 8 (siehe unten).
 
-- **Ollama**: NDJSON-Stream wird Zeile für Zeile gelesen, Text und Tokenzahlen
-  (prompt_eval_count/eval_count) stimmen, `num_ctx`, `keep_alive` und Systemrolle
-  werden korrekt gesendet; Antwort ohne Streaming (einzelnes JSON) wird verarbeitet;
-  reine Denk-Ausgaben führen zu einer verständlichen Fehlermeldung statt zu leerem Text;
-  Modellliste, Embedding-Modell-Suche, Embeddings und Entladen funktionieren.
-- **OpenAI-kompatibel**: SSE-Streaming, `stream_options.include_usage`, Nutzung von
-  `max_completion_tokens` (nicht `max_tokens`) bei OpenAI, Verarbeitung einer
-  kompletten JSON-Antwort, korrekte Fehlerübersetzung (401 → „Zugang abgelehnt … API-Schlüssel prüfen"),
-  fehlender Schlüssel wird gemeldet.
-- **Claude**: Nachrichten-Stream mit `message_start` / `content_block_delta` /
-  `message_delta`, Denk-Bausteine (`thinking_delta`) werden ignoriert, Tokenzahlen
-  beider Richtungen stimmen, `max_tokens` wird immer gesendet, `anthropic-version`
-  und `anthropic-dangerous-direct-browser-access` sind gesetzt, Fehlerereignisse im
-  Stream werden erkannt.
-- **Gemini**: Modellliste filtert Embedding-Modelle heraus, Stream wird gelesen,
-  `systemInstruction` und `generationConfig` werden korrekt aufgebaut.
-- **Streaming abschaltbar**: Mit `allowStream: false` kommt die Antwort am Stück,
-  wird aber inhaltlich identisch ausgeliefert (Schalter „Streaming" in den Einstellungen).
+---
 
-### Modellwahl und Ausweichen (`tests/brain.test.ts`, 15 Tests)
+## 1. Verbesserungskreislauf (`tests/learning-loop.test.ts`, 10 Tests)
 
-- Auto-Modus antwortet lokal, wenn lokal funktioniert.
-- Lokaler Fehler (HTTP 500) → automatisch Cloud, Ausweichkette wird protokolliert.
-- Schwere Aufgabe (Analyseauftrag / sehr viel Kontext / sehr lange Frage) → direkt Cloud.
-- Unbrauchbare lokale Antwort („Als KI-Modell kann ich …") → Ausweichen auf Cloud.
-- Lokaler Modus bleibt lokal, auch wenn es schiefgeht; Cloud-Modus nutzt nie lokal.
-- Aussagekräftige Fehlermeldung, wenn gar nichts eingerichtet ist.
-- Auswahl des stärksten installierten lokalen Modells (Embedding-Modelle werden ausgenommen).
-- Ablauf Frage → Quellen → Antwort: Quellen landen mit `[Q1]` im Prompt, die geöffnete
-  Notiz wird auf Wunsch beigelegt, fehlende Treffer werden offen gemeldet, der
-  Zwei-Durchgang-Modus („gründlich") wird gesetzt, die Wissenssuche-Einstellung greift.
+Das ist der Kern von Version 2.0. Der Testserver verhält sich wie ein echtes Modell:
+Er antwortet schlecht, solange ihm die Information fehlt, und gut, sobald sie ihm als
+gelerntes Wissen mitgeliefert wird.
 
-### Wissensindex (`tests/vault-index.test.ts`, 12 Tests)
+- **Schwache lokale Antwort wird erkannt und ersetzt**: Abdeckung der lokalen Antwort
+  unter 40 %, Cloud-Abdeckung über 70 %, `escalated = true`, Eintrag in den Hinweisen
+  („Lokale Antwort war zu schwach → von openai/gpt-6-astra aufgearbeitet").
+- **Daraus wird gelernt**: Lektion gespeichert (Grund „upgrade", Herkunftsmodell,
+  Notizquelle), Markdown-Notiz im Vault mit `jarvis-gelernt: true`, Gedächtnisordner
+  automatisch aus der Vault-Suche ausgenommen.
+- **Nächste gleiche Frage**: das lokale Modell antwortet **ohne Cloud** (Netzwerkzähler
+  bleibt bei 1 Aufruf), Abdeckung über 60 %, die Lektion steht nachweislich als
+  `GELERNTES WISSEN` und `[W1]` im Prompt, sowohl im letzten Nutzerbeitrag als auch in
+  der Systemanweisung.
+- **Messbarer Fortschritt**: Der Qualitätsverlauf enthält zwei Werte — Runde 1
+  (lokal schwach, Cloud stark), Runde 2 (lokal stark); die Differenz ist größer als
+  30 Prozentpunkte. Die Lektion wurde als benutzt vermerkt (`usedCount > 0`).
+- **„Nachfragen"-Modus**: Es wird nichts gespeichert; erst der Klick auf „Merken"
+  speichert die Lektion.
+- **Lernumfang**: `nur Ausweichfälle` lernt nicht, wenn keine Ausweichung nötig war;
+  `aus jeder Cloud-Antwort` lernt auch im Cloud-Modus.
+- **Fehlerhafte Cloud-Antwort** (HTTP 429) führt zu einer Fehlermeldung und **nicht**
+  zu einer Lektion.
+- **Nutzerkorrektur** wird verbindlich: Korrektur steht in der Notiz im Vault, in den
+  Regeln der Einstellungen und im Modelfile (`Korrigierte Fassung (verbindlich)`).
+- **Prompt-Aufbau**: Notizwissen (`[Q1]`) und gelerntes Wissen (`[W1]`) kommen
+  gemeinsam und getrennt gekennzeichnet an.
+- **Abgeschaltetes Lernen** ändert nichts am bisherigen Verhalten (keine Lektion, kein
+  `GELERNTES WISSEN` im Prompt).
 
-- Nur erlaubte Markdown-Notizen werden gelesen: ausgeschlossene Ordner, versteckte
-  Ordner (`.obsidian`), Nicht-Markdown und Notizen mit `ki-privat: true` fallen raus.
-- Abschnittsbildung an Überschriften, Stoppwortfilter, Umlaut-Normalisierung.
-- Treffer über Stichworte; Treffer über Vektoren, wenn kein Wort übereinstimmt
-  (deterministischer Test-Embedder).
-- Geänderte und gelöschte Notizen werden beim nächsten Lauf nachgezogen.
-- **Zwischenspeicher übersteht einen Neustart** — dabei wurde ein echter Fehler gefunden
-  (nach dem Neuladen waren die Stichwortlisten leer); behoben und abgesichert.
-- Kontextbudget und Vielfalt (höchstens 2 Abschnitte pro Notiz) werden eingehalten.
-- Prompt-Regeln gegen Erfindungen, Quellenkennzeichnung, Verhalten ohne Treffer.
+## 2. Lern-Bausteine (`tests/learning.test.ts`, 18 Tests)
 
-### GitHub (`tests/github.test.ts`, 10 Tests)
+**Qualitätsmessung**
+- Schlüsselbegriffe werden aus den Quellen gezogen — Eigennamen und Zahlen zuerst,
+  Stoppwörter entfernt, maximal 24 Begriffe, deutsche Wortformen über Wortstamm erkannt.
+- Schwache Antwort („Ich habe dazu eine Notiz gefunden") → Abdeckung unter 30 %,
+  als schwach erkannt; vollständige Antwort → Abdeckung über 60 %, nicht schwach.
+- Ausweich-Floskeln („Als KI-Modell kann ich …") werden erkannt; ehrliche Hinweise
+  („in den Quellen findet sich dazu nichts") **nicht** fälschlich als Ausweichantwort.
+- Vergleich lokal gegen Cloud nennt Abdeckungen und die Verbesserung.
 
-Gegen einen nachgebauten, aber echten GitHub-Git-Data-Server (HTTP, echte Git-Objekt-Hashes):
+**Lernspeicher**
+- Lektionen werden gespeichert, wiedergefunden (Frage „Wann ist der Endtermin von
+  Projekt Alpha?" findet „Wann endet Projekt Alpha?") und Dubletten zusammengeführt.
+- **Neustart-Festigkeit**: Nach neuem Laden aus derselben Datei sind Lektionen,
+  Modellstatistik und Qualitätsverlauf identisch vorhanden.
+- **Beschädigte Datei** (`{kaputt`) führt nicht zum Absturz — Speicher startet leer und
+  speichert anschließend korrekt weiter.
+- Bewerten (`good`/`bad`), Korrigieren (Korrektur wird bevorzugt gefunden und mit
+  „Vom Nutzer korrigiert" gerendert).
+- Obergrenze wird eingehalten; als schlecht bewertete Einträge fallen zuerst heraus.
+- Verlaufstext enthält Zeitstempel, Art (Antwort/Aufwertung/destilliert) und
+  Prozentwerte für lokal und Cloud.
+- Zähler für „neue Lektionen seit dem letzten Verbessern" funktioniert (2 → nach
+  Destillation 0).
 
-- Git-Blob-Hash stimmt mit Gits eigener Berechnung überein (`hello world\n`,
-  leerer Inhalt, und die reine JavaScript-SHA-1 gegen Node für 6 Längen).
-- Erste Sicherung legt Branch, Blobs, Baum und Commit an.
-- Zweite Sicherung überträgt **nichts** („Nichts zu sichern"), nach Änderung genau
-  eine Datei — der Vergleich läuft über Hashes, nicht über Zeitstempel.
-- Gelöschte Dateien werden nur mit aktivierter Einstellung entfernt.
-- Unterordner (`pathPrefix`) und „nur Markdown" funktionieren.
-- Fehlende Angaben (Owner/Repo) führen zu klarer Meldung.
-- Wiederherstellung: neue Dateien werden geladen, identische Dateien übersprungen,
-  Änderungen des Quellrechners kommen korrekt an (Version 1 → Version 2 plus neue Datei).
+**Destillation**
+- Modelfile enthält `FROM`, `PARAMETER temperature`, `PARAMETER num_ctx`, `SYSTEM`,
+  Regeln aus Korrekturen und `MESSAGE user` / `MESSAGE assistant` je Beispiel.
+- Dreifache Anführungszeichen im Inhalt können das Modelfile nicht zerstören
+  (`escapeTripleQuote`, geprüft: kein `""""""` im Ergebnis).
+- Plan wählt die besten Beispiele (gute Bewertung, Korrektur, Nutzung, Aufwertung),
+  überspringt zu kurze Antworten und meldet, was ausgelassen wurde.
+- Ablehnung mit klarer Begründung, wenn noch nichts gelernt wurde oder keine geeigneten
+  Beispiele existieren.
+- `run()` legt das Profil über die Ollama-API an und **prüft anschließend, ob Ollama es
+  wirklich führt** — sonst klare Fehlermeldung statt stiller Lüge.
+- Aufräumen alter Profile: `jarvis-brain-v2` wird entfernt, `jarvis-brain-v1` und das
+  Basismodell `qwen3:8b` bleiben unangetastet.
 
-### Oberfläche (`tests/ui.test.ts`, 11 Tests)
+**Gelerntes als Markdown**
+- Notiz enthält Kopfbereich (`jarvis-gelernt`, `jarvis-id`, Modell, Grund, Bewertung),
+  Frage, gelernte Antwort, Korrektur (falls vorhanden) und Quellenverweise `[[…]]`.
+- Nur fehlende Notizen werden angelegt (zweiter Lauf: 0 neu, 2 vorhanden).
+- Mit `writeNotes: false` wird nichts geschrieben.
 
-Gegen die nachgebaute Obsidian-Schnittstelle mit echtem DOM:
+## 3. Anbieter (`tests/providers.test.ts`, 11 Tests)
 
-- Werkzeugleiste, Statuszeile und Modellliste (mit lokalen und Cloud-Modellen) werden aufgebaut;
-  die Modellwahl schaltet den Betriebsmodus passend mit.
-- Senden → Streaming-Text erscheint, Quellenchips werden angezeigt, Metazeile zeigt
-  Modell, Dauer, Tokenzahlen und Kosten.
-- Fehlerfall zeigt Hilfestellung („ollama serve") und den Knopf „Mit Cloud-Modell erneut versuchen".
-- Abbruch-Signal erreicht das Modell; Ausweichkette und Nicht-Streaming-Hinweis erscheinen.
-- Verlauf: Titel aus der ersten Frage, Sitzungswechsel, Löschen, Begrenzung auf 40 Beiträge.
-- Beim Schließen der Ansicht wird eine laufende Anfrage abgebrochen.
+- **Ollama**: NDJSON-Stream Zeile für Zeile, Tokenzahlen, `num_ctx`, `keep_alive`,
+  Systemrolle; Antwort ohne Streaming; reine Denk-Ausgaben → verständlicher Fehler;
+  Modellliste, Embedding-Suche, Embeddings, Entladen.
+- **OpenAI-kompatibel**: SSE, `stream_options.include_usage`,
+  `max_completion_tokens` statt `max_tokens` bei OpenAI, komplette JSON-Antwort,
+  Fehlerübersetzung (401 → „Zugang abgelehnt … API-Schlüssel prüfen"), fehlender Schlüssel.
+- **Claude**: Stream-Ereignisse, Denk-Bausteine werden ignoriert, Tokenzahlen in beide
+  Richtungen, `anthropic-version`, `anthropic-dangerous-direct-browser-access`,
+  Fehlerereignisse.
+- **Gemini**: Modellliste ohne Embedding-Modelle, Stream, `systemInstruction`.
+- **Streaming abschaltbar**: identischer Text, aber am Stück geliefert.
 
-### Fertiges Bündel (`tests/bundle-smoke.test.ts`, 3 Tests)
+## 4. Modellwahl (`tests/brain.test.ts`, 15 Tests)
 
-Geladen wird hier nicht der Quellcode, sondern die ausgelieferte Datei `main.js` —
-in einer nachgebauten Obsidian-Umgebung und gegen einen echten lokalen Ollama-Server:
+Auto antwortet lokal; lokaler Fehler oder unbrauchbare Antwort → Cloud; schwere Aufgaben
+direkt Cloud; lokaler Modus bleibt lokal; Cloud-Modus nutzt nie lokal; klare Meldung ohne
+Einrichtung; Auswahl des stärksten installierten lokalen Modells; Presets enthalten
+`claude-opus-5-5`, `gpt-6-astra`, `gemini-3.8-flash`, `qwen3.6:27b`.
 
-- Das Bündel lädt, exportiert die Plugin-Klasse und richtet sich vollständig ein.
-- Modelle werden wirklich vom Dienst geholt (`/api/tags`), der Wissensindex wird über
-  den echten Vault-Zugriff aufgebaut.
-- Eine komplette Frage läuft durch alle Schichten (Index → Suche → Prompt → Ollama →
-  Antwort) und kommt mit korrekter Quellenangabe `[Q1] Projekt Alpha.md` zurück;
-  der tatsächlich gesendete Prompt enthält die Notiz und die Quellen-Regeln.
-- Der Diagnosebericht enthält alle Abschnitte (Ollama, Cloud, GitHub, Wissen, Einstellungen).
-- Nicht erreichbarer Dienst → verständliche Fehlermeldung „Kein Modell konnte antworten".
+## 5. Wissensindex (`tests/vault-index.test.ts`, 12 Tests)
 
-## Was zusätzlich statisch geprüft wurde
+Ausschlüsse (Ordner, versteckte Ordner, Nicht-Markdown, `ki-privat`), Abschnittsbildung,
+Abdeckung von Stichwort- **und** Vektorsuche, Nachziehen geänderter/gelöschter Notizen,
+Neustart über den Zwischenspeicher, Kontextbudget und Vielfalt (max. 2 Abschnitte je
+Notiz), Prompt-Regeln gegen Erfindungen.
 
-- `npm run typecheck` (TypeScript, `strict`) läuft fehlerfrei über `src/` und `tests/`.
-- `npm run build` erzeugt ein Bündel von rund 106 KB (esbuild, CJS, Ziel Obsidian).
-- `npm test` baut das Bündel vorher automatisch, damit die Tests nie auf einem alten Stand laufen.
-- Es werden **keine** externen Laufzeit-Abhängigkeiten mitgeliefert; das Bündel nutzt
-  nur Obsidian-Schnittstellen und Browser-Standards (`fetch`, `crypto`, `btoa/atob`).
-- CORS-Ersatzweg: Wenn ein Dienst direkte Browser-Anfragen blockt (typisch: Ollama ohne
-  `OLLAMA_ORIGINS` oder die OpenAI-API), schaltet das Plugin automatisch auf Obsidians
-  `requestUrl` um und zeigt die Antwort ohne Streaming. Beide Wege sind getestet.
-- `crypto.subtle` fehlt auf manchen Mobilgeräten; deshalb gibt es eine eigene
-  SHA-1-Umsetzung, die gegen Node geprüft ist (siehe oben).
+## 6. GitHub (`tests/github.test.ts`, 10 Tests)
 
-## Was hier nicht geprüft werden konnte
+Gegen einen nachgebauten Git-Data-Server mit echten Hashes: SHA-1-Übereinstimmung mit
+Git (inkl. reiner JavaScript-Umsetzung für Mobilgeräte), erste Sicherung, zweite
+Sicherung ohne Übertragung, Änderungserkennung, Löschen nur auf Wunsch, Unterordner,
+„nur Markdown", Wiederherstellung (neu, geändert, unverändert), klare Fehlermeldungen.
+
+## 7. Oberfläche (`tests/ui.test.ts`, 12 Tests)
+
+Aufbau der Bedienelemente, Modellwahl schaltet den Modus mit, Standardwert der
+Notiz-Option, Streaming-Antwort mit Quellenchips und Metazeile (Modell, Dauer, Token,
+Qualität), Fehlerfall mit Hilfestellung und Cloud-Retry, Abbruch, Ausweichhinweis,
+Quellenklick, Aufräumen beim Schließen, Verlaufsverwaltung (Titel, Wechsel, Löschen,
+Begrenzung auf 40 Beiträge).
+
+## 8. Ausgeliefertes Bündel (`tests/bundle-smoke.test.ts`, 4 Tests)
+
+Geladen wird die echte `main.js` in einer nachgebauten Obsidian-Umgebung, mit echtem
+Ollama-Testserver:
+
+- Bündel lädt, exportiert die Plugin-Klasse, richtet sich vollständig ein; Modelle
+  kommen wirklich vom Dienst; Index wird über den echten Vault-Zugriff aufgebaut.
+- Komplette Frage durch alle Schichten mit korrekter Quellenangabe `[Q1] Projekt Alpha.md`;
+  der gesendete Prompt enthält die Notizen und die Quellenregeln.
+- **Lernen im Bündel**: Cloud-Antwort → Lektion gespeichert, Markdown-Notiz im Vault,
+  Gedächtnisordner ausgeschlossen; zweite Frage schickt `GELERNTES WISSEN` ans lokale
+  Modell; Destillation legt über die echte Ollama-Schnittstelle `/api/create` das Profil
+  `jarvis-brain-v1` an (Modelfile mit `FROM qwen3:8b`, `SYSTEM`, `MESSAGE`), der
+  Lernbericht enthält Lektionen und Qualitätsverlauf.
+- Nicht erreichbarer Dienst → verständliche Fehlermeldung.
+
+## 9. Während der Entwicklung gefundene und behobene Fehler
+
+1. **GET statt POST** im CORS-Ersatzweg (`postJson` setzte keine Methode).
+2. **Suche nach Neustart kaputt**: Stichwortlisten wurden nicht mitgespeichert.
+3. **`crypto.subtle` fehlt** auf manchen Mobilgeräten → eigene, gegen Node geprüfte
+   SHA-1-Umsetzung (ein Auffüllfehler bei genauem Blockmaß wurde dabei gefunden).
+4. **Auto-Backup-Zeitstempel** war sprachabhängig geparst → jetzt zusätzlich ISO-Wert.
+5. **Ausweich-Erkennung** übersah die Schreibweise „KI-Modell" (mit Bindestrich).
+6. **Irrelevante Lektionen** wurden ohne echte Wortübereinstimmung verwendet (nur wegen
+   ihres Alters) → jetzt harte Mindestübereinstimmung.
+7. **Speicherverzögerungen** machten Tests unnötig langsam → einstellbare Verzögerung.
+8. **Testnachbau der GitHub-Baum-Schnittstelle** schnitt den Pfad falsch ab (Testfehler,
+   kein Produktfehler) — korrigiert, damit der Test wirklich prüft, was er behauptet.
+
+## 10. Was hier nicht geprüft werden konnte
 
 - **Kein echter Modelllauf**: In dieser Umgebung lief kein Ollama-Dienst und es wurden
-  keine Cloud-Schlüssel verwendet. Die Qualität einer Antwort hängt am gewählten Modell
-  und wurde nicht bewertet.
-- **Kein echter GitHub-Zugriff**: Der Sync wurde gegen einen nachgebauten Server
-  getestet (echte Hashes, echte HTTP-Aufrufe). Die Rechteprüfung deines Tokens kann
-  erst bei dir stattfinden — dafür gibt es „Verbindung testen".
-- **Windows-Installer**: Das PowerShell-Skript wurde nicht unter Windows ausgeführt.
-  Es kopiert drei Dateien, sichert alte Stände und liest die Vault-Liste aus
-  `obsidian.json`; alle Befehle sind einzeln nachvollziehbar. Wenn es bei dir scheitert,
-  nimm Weg C (drei Dateien von Hand kopieren) aus der README — das ist gleichwertig.
-- **Oberflächen-Layout in echtem Obsidian**: Das Aussehen nutzt Obsidian-CSS-Variablen
-  und wurde nur in der Testumgebung aufgebaut, nicht auf echten Themes geprüft.
-- **Kostenangaben**: Die Preistabelle ist eine Momentaufnahme (Oktober 2026) und eine
-  Schätzung ohne Gewähr.
+  keine Cloud-Schlüssel verwendet. **Die Qualität echter Antworten** (und damit, wie
+  schnell sich dein lokales Modell in der Praxis verbessert) ist **nicht** gemessen —
+  dafür gibt es Qualitätsverlauf und Lernbericht in deinem Obsidian.
+- **Keine echte Ollama-Modellerstellung**: `/api/create` wurde gegen einen echten
+  HTTP-Server geprüft, aber nicht gegen einen echten Ollama-Daemon. Der erste echte Bau
+  eines `jarvis-brain-vX` findet auf deinem Rechner statt; der Verbindungstest und die
+  Nachprüfung, ob Ollama das Profil führt, sind eingebaut.
+- **Kein echter GitHub-Zugriff** und keine Rechteprüfung deines Tokens (dafür
+  „Verbindung testen").
+- **Windows-Installer** wurde nicht unter Windows ausgeführt (er kopiert drei Dateien und
+  liest die Vault-Liste; Weg C in der README ist gleichwertig).
+- **Aussehen** in echten Obsidian-Themes (nutzt nur Obsidian-CSS-Variablen).
+- **Preistabelle** ist eine Momentaufnahme (Oktober 2026), Schätzung ohne Gewähr.
 
-## Erster echter Test bei dir
+## 11. Empfohlener erster echter Test bei dir
 
-1. Einstellungen → Jarvis KI → **Alle Verbindungen prüfen**. Der Bericht zeigt, was
-   erreichbar ist, welche Modelle gefunden wurden und ob ein Embedding-Modell läuft.
-2. Eine Frage stellen, deren Antwort du kennst (z. B. „Was steht in Notiz X?"), und
-   die Quellen unter der Antwort anklicken.
-3. Erst danach produktiv nutzen.
+1. Einstellungen → Jarvis KI → **Alle Verbindungen prüfen**.
+2. Eine Frage stellen, deren Antwort du kennst (Modus ⚡ Auto). Erwartung: lokale Antwort,
+   Qualität in %, ggf. Aufwertung durch Cloud mit Hinweis „Lokale Antwort war zu schwach".
+3. Unter der Cloud-Antwort auf **Hilfreich** klicken (oder korrigieren).
+4. In der Kopfzeile prüfen: Lektionen sind gestiegen. Befehl **Lernen: Was hat Jarvis
+   gelernt?** zeigt den Verlauf.
+5. Dieselbe Frage erneut im Modus 🏠 Lokal: Das Gelernte steht im Prompt, die Antwort
+   sollte die fehlenden Punkte jetzt enthalten.
+6. Wenn einige Lektionen zusammen sind: 🎓 **Lernmodell bauen** → Standardmodell wird
+   `jarvis-brain-vX` → erneut fragen und den Qualitätsverlauf vergleichen.

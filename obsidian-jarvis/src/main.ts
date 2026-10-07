@@ -7,11 +7,18 @@ import { JARVIS_VIEW_TYPE, JarvisChatView } from './chat/view';
 import { SessionStore, type ChatSession } from './chat/session';
 import { VaultIndex, type IndexStats } from './rag/vault-index';
 import {
+  ObsidianJsonFile,
+  ObsidianMemoryNoteFs,
   ObsidianVaultFileSystem,
   ObsidianVaultReader,
   OllamaEmbedder,
   PluginIndexPersist,
 } from './obsidian-bridge';
+import { LearningStore } from './learn/store';
+import { MemoryNotes } from './learn/notes';
+import { Distiller, modelNameForVersion } from './learn/distill';
+import type { PendingLesson } from './chat/assistant';
+import type { Lesson } from './learn/types';
 import {
   DEFAULT_SETTINGS,
   JarvisSettingTab,
@@ -39,11 +46,15 @@ export default class JarvisPlugin extends Plugin {
   index!: VaultIndex;
   assistant!: Assistant;
   sessions!: SessionStore;
+  learning!: LearningStore;
+  memoryNotes!: MemoryNotes;
+  distiller!: Distiller;
   private keys: Record<string, string> = {};
   private githubSync!: GithubSync;
   private saveTimer: number | null = null;
   private lastChangeBackup = 0;
   private pendingChangeBackup = false;
+  private distillRunning = false;
 
   async onload(): Promise<void> {
     const raw = (await this.loadData()) as PluginData | null;
@@ -67,11 +78,26 @@ export default class JarvisPlugin extends Plugin {
       embedder,
     );
 
+    this.learning = new LearningStore(
+      new ObsidianJsonFile(this.app, `${this.app.vault.configDir}/plugins/${this.manifest.id}/cache/learning.json`),
+      () => this.settings.learning,
+    );
+    await this.learning.load();
+    this.memoryNotes = new MemoryNotes(new ObsidianMemoryNoteFs(this.app), () => this.settings.learning);
+    this.distiller = new Distiller({
+      ollama: this.brain.provider('ollama') as OllamaProvider,
+      learning: () => this.settings.learning,
+      local: () => this.settings.local,
+      lessons: () => this.learning.list(),
+    });
+
     this.assistant = new Assistant({
       settings: () => this.settings,
       index: this.index,
       brain: this.brain,
       vaultName: () => this.app.vault.getName(),
+      learning: { store: this.learning, notes: this.memoryNotes },
+      persistSettings: () => this.saveSettings(),
     });
 
     this.sessions = new SessionStore(raw?.sessions ?? [], async (sessions) => {
@@ -100,10 +126,25 @@ export default class JarvisPlugin extends Plugin {
         .then(() => this.refreshOpenView())
         .catch(() => undefined);
     }, 2500);
+
+    // Gelerntes Wissen als Notizen nachziehen (z. B. nach einem Update oder Sync)
+    window.setTimeout(() => {
+      void this.assistant
+        .syncMemoryNotes()
+        .then((result) => {
+          if (result.written > 0) {
+            new Notice(`Jarvis: ${result.written} gelernte Notiz(en) im Ordner "${this.settings.learning.memoryFolder}" angelegt.`, 8000);
+          }
+        })
+        .catch(() => undefined);
+    }, 5000);
   }
 
   onunload(): void {
     if (this.saveTimer) window.clearTimeout(this.saveTimer);
+    // Lernen sofort auf Festplatte schreiben - nichts darf verloren gehen.
+    void this.learning?.flush();
+    void this.persist({});
   }
 
   // ------------------------------------------------------------ Speichern
@@ -486,6 +527,43 @@ export default class JarvisPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: 'learning-report',
+      name: 'Lernen: Was hat Jarvis gelernt?',
+      callback: () => {
+        new ReportModal(this.app, 'Jarvis: was gelernt wurde', this.learningReport()).open();
+      },
+    });
+
+    this.addCommand({
+      id: 'learning-distill',
+      name: 'Lernen: Lokales Modell aus Gelerntem verbessern',
+      callback: async () => {
+        try {
+          await this.distillNow();
+        } catch (error) {
+          new Notice(`Verbessern nicht möglich: ${(error as Error).message}`, 15000);
+        }
+      },
+    });
+
+    this.addCommand({
+      id: 'learning-sync-notes',
+      name: 'Lernen: Gelerntes als Notizen im Vault ablegen',
+      callback: async () => {
+        const result = await this.assistant.syncMemoryNotes();
+        new Notice(`Gelernte Notizen: ${result.written} neu angelegt, ${result.existing} bereits vorhanden.`, 10000);
+      },
+    });
+
+    this.addCommand({
+      id: 'learning-wipe',
+      name: 'Lernen: Gelerntes Wissen löschen',
+      callback: async () => {
+        await this.wipeLearning();
+      },
+    });
+
+    this.addCommand({
       id: 'test-connections',
       name: 'Verbindungen testen (Ollama + Cloud + GitHub)',
       callback: async () => {
@@ -653,6 +731,7 @@ export default class JarvisPlugin extends Plugin {
   }
 
   private async tickGithub(): Promise<void> {
+    void this.tickLearning();
     const github = this.settings.github;
     if (!github.enabled || !github.owner || !github.repo || !this.getKey('github')) return;
 
@@ -687,6 +766,22 @@ export default class JarvisPlugin extends Plugin {
     }
   }
 
+  /** Automatisches Destillieren, wenn genug Neues gelernt wurde. */
+  private async tickLearning(): Promise<void> {
+    const learning = this.settings.learning;
+    if (!learning.enabled || learning.autoDistillAfter <= 0) return;
+    if (this.distillRunning) return;
+    if (this.learning.pendingForDistill() < learning.autoDistillAfter) return;
+    this.distillRunning = true;
+    try {
+      await this.runDistill({ silent: true });
+    } catch (error) {
+      new Notice(`Automatisches Verbessern fehlgeschlagen: ${(error as Error).message}`, 12000);
+    } finally {
+      this.distillRunning = false;
+    }
+  }
+
   private registerVaultWatchers(): void {
     let debounce: number | null = null;
     const markDirty = () => {
@@ -704,6 +799,192 @@ export default class JarvisPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('create', markDirty));
     this.registerEvent(this.app.vault.on('delete', markDirty));
     this.registerEvent(this.app.vault.on('rename', markDirty));
+  }
+
+  // ---------------------------------------------------------------- Lernen
+
+  /** Schnittstelle für die Chat-Ansicht. */
+  learningStats(): { lessons: number; corrections: number; avgLocalQuality: number; avgCloudQuality: number; improvement: number; pending: number } {
+    return this.learningSnapshot();
+  }
+
+  async saveLesson(payload: PendingLesson): Promise<void> {
+    await this.learningSaveLesson(payload);
+  }
+
+  async rateLesson(id: string, rating: Lesson['rating']): Promise<void> {
+    await this.learningRate(id, rating);
+  }
+
+  async correctLesson(id: string, correction: string): Promise<void> {
+    await this.learningCorrect(id, correction);
+  }
+
+  async distill(): Promise<string> {
+    return this.distillNow();
+  }
+
+  showLearningReport(): void {
+    new ReportModal(this.app, 'Jarvis: was gelernt wurde', this.learningReport()).open();
+  }
+
+  learningSnapshot(): { lessons: number; corrections: number; avgLocalQuality: number; avgCloudQuality: number; improvement: number; pending: number } {
+    const snapshot = this.learning.snapshot();
+    return {
+      lessons: snapshot.lessons,
+      corrections: snapshot.corrections,
+      avgLocalQuality: snapshot.avgLocalQuality,
+      avgCloudQuality: snapshot.avgCloudQuality,
+      improvement: snapshot.improvement,
+      pending: this.learning.pendingForDistill(),
+    };
+  }
+
+  /** Bericht: was wurde gelernt, wie gut ist die lokale KI, was hat sie verbessert. */
+  learningReport(): string[] {
+    const snapshot = this.learning.snapshot();
+    const learning = this.settings.learning;
+    const lines: string[] = [];
+    lines.push('— Stand —');
+    lines.push(`Lektionen: ${snapshot.lessons} (davon ${snapshot.corrections} mit deiner Korrektur, ${snapshot.good} als gut, ${snapshot.bad} als schlecht bewertet)`);
+    lines.push(`Neue Lektionen seit dem letzten Verbessern: ${this.learning.pendingForDistill()}`);
+    lines.push(`Qualität im Schnitt (Quellenabdeckung): lokal ${Math.round(snapshot.avgLocalQuality * 100)} %` + (snapshot.avgCloudQuality ? `, Cloud ${Math.round(snapshot.avgCloudQuality * 100)} %` : ''));
+    if (snapshot.improvement) {
+      lines.push(`Veränderung seit dem letzten Verbessern: ${snapshot.improvement > 0 ? '+' : ''}${Math.round(snapshot.improvement * 100)} %`);
+    }
+    lines.push(`Lernmodelle erstellt: ${snapshot.distills}`);
+    if (learning.distillVersion) {
+      lines.push(`Aktuelles Lernmodell: ${learning.lastDistillModel || modelNameForVersion(learning.distillVersion)}${learning.lastDistillAt ? ` (${learning.lastDistillAt})` : ''}`);
+    }
+    lines.push('');
+    lines.push('— Qualitätsverlauf (neueste unten) —');
+    lines.push(...this.learning.historyText(24));
+    if (snapshot.modelStats.length) {
+      lines.push('');
+      lines.push('— Modelle —');
+      for (const stat of snapshot.modelStats.slice(0, 12)) {
+        lines.push(
+          `${stat.model}: ${stat.calls} Aufruf(e), ${stat.failures} Fehler, ${stat.avgMs} ms im Schnitt` +
+            (stat.avgQuality ? `, Qualität ${Math.round(stat.avgQuality * 100)} %` : ''),
+        );
+      }
+    }
+    lines.push('');
+    lines.push('— Wie das Lernen funktioniert —');
+    lines.push('Gelernt werden fertige Antworten starker Modelle und deine Korrekturen - als Kontext und Regeln,');
+    lines.push('nicht als trainierte Modellgewichte. Deshalb ist alles nachvollziehbar, änderbar und löschbar.');
+    return lines;
+  }
+
+  async wipeLearning(): Promise<void> {
+    await this.learning.wipe();
+    new Notice('Gelerntes Wissen wurde gelöscht. Bereits erstellte Notizen bleiben im Ordner erhalten.', 10000);
+    this.refreshOpenView();
+  }
+
+  /** Lektion speichern (wenn „nachfragen" eingestellt ist) und Notiz anlegen. */
+  async learningSaveLesson(payload: PendingLesson): Promise<void> {
+    const result = await this.assistant.saveLesson(payload);
+    if (result.saved) {
+      await this.saveSettings();
+      new Notice(
+        result.notePath
+          ? `Gemerkt. Notiz erstellt: ${result.notePath}`
+          : `Gemerkt (${this.learning.count()} Lektionen).`,
+        8000,
+      );
+    }
+    this.refreshOpenView();
+  }
+
+  async learningRate(id: string, rating: Lesson['rating']): Promise<void> {
+    await this.assistant.rateLesson(id, rating);
+    new Notice(rating === 'good' ? 'Als hilfreich bewertet — wird beim Verbessern bevorzugt.' : 'Als schlecht bewertet — wird nicht mehr verwendet.');
+    this.refreshOpenView();
+  }
+
+  async learningCorrect(id: string, correction: string): Promise<void> {
+    await this.assistant.correctLesson(id, correction);
+    await this.saveSettings();
+    new Notice('Korrektur gespeichert. Sie gilt ab jetzt als verbindlich und fließt ins lokale Modell ein.', 10000);
+    this.refreshOpenView();
+  }
+
+  /** Destillieren: aus dem Gelernten ein lokales Ollama-Modell erstellen. */
+  async distillNow(): Promise<string> {
+    return this.runDistill({ silent: false });
+  }
+
+  private async runDistill(options: { silent: boolean }): Promise<string> {
+    const plan = this.distiller.plan();
+    const problem = this.distiller.validate(plan);
+    if (problem) throw new Error(problem);
+
+    if (options.silent) {
+      return this.applyDistill(plan);
+    }
+
+    const lines = [
+      `Basismodell: ${plan.base}`,
+      `Neues Profil: ${plan.model}`,
+      `Beispiele aus dem Gelernten: ${plan.examples.length}`,
+      `Regeln aus Korrekturen: ${plan.rules.length}`,
+      `Größe des Modellprofils: ${(plan.bytes / 1024).toFixed(1)} KB`,
+      '',
+      plan.examples.length ? 'Diese Fragen werden eingebaut (gekürzt):' : 'Keine Beispiele.',
+      ...plan.examples.slice(0, 12).map((lesson) => `+ ${lesson.question.replace(/\s+/g, ' ').slice(0, 70)}`),
+      plan.skipped.length ? '' : '',
+      plan.skipped.length ? 'Nicht übernommen:' : '',
+      ...plan.skipped.slice(0, 6).map((entry) => `- ${entry}`),
+      '',
+      'Wichtig: Es werden keine Modellgewichte trainiert und nichts heruntergeladen.',
+      'Ollama legt aus deinem Basismodell ein neues Profil mit diesen Beispielen an.',
+      'Das Basismodell bleibt erhalten; du kannst jederzeit zurückwechseln.',
+    ].filter(Boolean);
+
+    return new Promise<string>((resolve, reject) => {
+      new ReportModal(
+        this.app,
+        'Lokales Modell aus Gelerntem verbessern?',
+        lines,
+        async () => {
+          try {
+            resolve(await this.applyDistill(plan));
+          } catch (error) {
+            reject(error);
+          }
+        },
+        'Jetzt verbessern',
+      ).open();
+    });
+  }
+
+  private async applyDistill(plan: ReturnType<Distiller['plan']>): Promise<string> {
+    const notice = new Notice(`Jarvis baut ${plan.model} aus ${plan.examples.length} Beispiel(en) …`, 0);
+    try {
+      const result = await this.distiller.run(plan);
+      // Einstellungen aktualisieren: neues Profil wird das lokale Standardmodell.
+      this.settings.local.defaultModel = result.model;
+      this.settings.learning.distillVersion = plan.version;
+      this.settings.learning.distillBase = plan.base;
+      this.settings.learning.lastDistillAt = new Date().toLocaleString('de-DE');
+      this.settings.learning.lastDistillModel = result.model;
+      await this.learning.recordDistill();
+      await this.saveSettings();
+      this.brain.invalidateModelCache('ollama');
+      const removed = await this.distiller.cleanup(plan.version).catch(() => []);
+      notice.hide();
+      new Notice(
+        `${result.message}\nStandardmodell ist jetzt ${result.model}.` +
+          (removed.length ? `\nAlte Profile entfernt: ${removed.join(', ')}` : ''),
+        18000,
+      );
+      this.refreshOpenView();
+      return result.message;
+    } catch (error) {
+      notice.hide();
+      throw error;
+    }
   }
 
   // -------------------------------------------------------------- Diagnose
