@@ -1,0 +1,25 @@
+{
+  "name": "jarvis-ai-obsidian",
+  "version": "2.1.2",
+  "description": "Jarvis AI fuer Obsidian - lokale Modelle (Ollama) + Top-Cloud-Modelle (Claude, GPT, Gemini, HuggingFace, n8n) + Werkzeuge (Internet, GitHub, Rechner, MCP) + Vault-Wissen + Lernen",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node esbuild.config.mjs production",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run build && npm run test"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^22.10.2",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^30.1.2",
+    "obsidian": "^1.7.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

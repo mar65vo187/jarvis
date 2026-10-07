@@ -4,6 +4,42 @@ Persönlicher Assistent mit deutschem Dashboard, Werkzeugen, SQLite-Gedächtnis,
 Missionen, Zeitplänen, PC-Steuerung, Telegram, GitHub-Remote-Kanal und einem
 benchmark-gesteuerten Agent-Upgrade-System.
 
+## Obsidian-Plug-in: Jarvis AI (lokal + Top-Cloud + lernfähig) — v2.0.1
+
+Im Ordner [`obsidian-jarvis/`](obsidian-jarvis/) liegt ein fertiges Obsidian-Plug-in,
+das dieselbe Idee direkt in deinen Vault bringt:
+
+- **Lokal** über Ollama (`qwen3.6:27b`, `gpt-oss:20b`, `qwen3:8b` …) oder **online**
+  über die stärksten Modelle (Claude Opus 5.5, GPT-6 Astra, Gemini 3.8 Flash, OpenRouter)
+  – umschaltbar mit einem Klick, mit automatischem Ausweichen (`⚡ Auto`).
+- **Lernfähig**: Wenn die Cloud aushelfen muss, lernt Jarvis daraus dauerhaft. Gelerntes
+  wird als Wissen gespeichert (`cache/learning.json` + Markdown-Notizen im Vault), bei
+  späteren Fragen als `[W1], [W2]` mitgeschickt, ist als Regel/Korrektur verbindlich und
+  lässt sich per Knopfdruck in ein neues lokales Ollama-Profil (`jarvis-brain-vX`)
+  destillieren. Qualität wird pro Antwort gemessen (Quellenabdeckung) und als Verlauf
+  angezeigt. Kein Vortäuschen von Training: es sind gespeicherte Antworten, Regeln und
+  Beispiel-Dialoge — nachvollziehbar, änderbar, löschbar. Das Gelernte liegt zusätzlich
+  als Markdown in `Jarvis Gedächtnis/`: fehlt der Zwischenspeicher (Neuinstallation,
+  Rechnerwechsel), holt Jarvis es beim Start automatisch aus diesen Notizen zurück.
+- **Fragen an den Vault** mit Quellenangaben `[Q1]`, hybride Suche (Vektoren + BM25),
+  private Notizen (`ki-privat: true`) und ausgeschlossene Ordner werden nie gelesen.
+- **GitHub-Anbindung**: Der Vault wird als echte Commits gesichert und auf einem
+  zweiten Rechner wiederhergestellt (nur geänderte Dateien, Vorschau vor jedem Schreiben).
+- Befehle für Zusammenfassen, Aufgaben, Verbessern, Übersetzen, Plan, Gegenprüfung.
+- 96 automatische Tests, alle grün – inklusive Ende-zu-Ende-Nachweis des Lernkreislaufs
+  (schwache lokale Antwort → Cloud lernt → nächste lokale Antwort ohne Cloud besser)
+  und des Wegs nach einer Neuinstallation (Gelerntes kommt aus den Notizen zurück).
+  Prüfbericht und ehrliche Grenzen in
+  [`obsidian-jarvis/PRUEFBERICHT.md`](obsidian-jarvis/PRUEFBERICHT.md).
+
+**Installation:** BRAT in Obsidian installieren → „Add a beta plugin for testing" →
+`mar65vo187/jarvis` → Plugin aktivieren. Alternativ die Dateien `main.js`,
+`manifest.json`, `styles.css` aus dem Release in `.obsidian/plugins/jarvis-ai/` kopieren
+oder den Helfer `obsidian-jarvis/install/JARVIS-INSTALLIEREN.cmd` (Windows) bzw.
+`obsidian-jarvis/install/install.sh` (macOS/Linux) benutzen.
+
+Details, Einrichtung der Modelle, Schlüssel und Fehlersuche: [`obsidian-jarvis/README.md`](obsidian-jarvis/README.md)
+
 ## Gehirne und Modellquellen
 
 Jarvis kann vier Master-Wege nutzen:

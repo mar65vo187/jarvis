@@ -1,0 +1,135 @@
+name: Obsidian-Plugin bauen und veröffentlichen
+
+on:
+  push:
+    paths:
+      - 'obsidian-jarvis/**'
+    tags:
+      - 'obsidian-jarvis-*'
+  pull_request:
+    paths:
+      - 'obsidian-jarvis/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: obsidian-jarvis
+
+jobs:
+  pruefen:
+    name: Prüfen und bauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: obsidian-jarvis/package-lock.json
+      - run: npm ci
+      - name: TypeScript prüfen
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Bündel bauen
+        run: npm run build
+      - name: Versionen prüfen (manifest.json, versions.json, package.json)
+        run: |
+          node -e "
+          const fs=require('fs');
+          const manifest=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+          const versions=JSON.parse(fs.readFileSync('versions.json','utf8'));
+          if(manifest.version!==pkg.version){console.error('Version in manifest.json und package.json unterschiedlich');process.exit(1);}
+          if(!versions[manifest.version]){console.error('Version fehlt in versions.json');process.exit(1);}
+          console.log('Version ok:', manifest.version);
+          "
+      - name: Paket für die Veröffentlichung schnüren
+        run: |
+          mkdir -p release
+          cp main.js manifest.json styles.css release/
+          cd release && zip -r ../obsidian-jarvis-$(node -p "require('./manifest.json').version").zip . 
+      - name: Dateien für den Release-Schritt bereitlegen
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-jarvis
+          path: |
+            obsidian-jarvis/main.js
+            obsidian-jarvis/manifest.json
+            obsidian-jarvis/styles.css
+            obsidian-jarvis/obsidian-jarvis-*.zip
+
+  veroeffentlichen:
+    name: Release anlegen
+    needs: pruefen
+    if: startsWith(github.ref, 'refs/tags/obsidian-jarvis-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: obsidian-jarvis
+      - run: npm run build
+        working-directory: obsidian-jarvis
+      - name: Installationspaket (ZIP) schnüren
+        working-directory: obsidian-jarvis
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          mkdir -p paket/jarvis-ai
+          cp main.js manifest.json styles.css paket/jarvis-ai/
+          (cd paket && zip -q -r "../obsidian-jarvis-${VERSION}.zip" jarvis-ai)
+          # Zweites Paket mit Quellcode, Tests und Prüfbericht
+          mkdir -p komplett/jarvis-ai-komplett
+          cp main.js manifest.json styles.css README.md PRUEFBERICHT.md versions.json package.json tsconfig.json esbuild.config.mjs vitest.config.ts komplett/jarvis-ai-komplett/
+          cp -r src tests install komplett/jarvis-ai-komplett/
+          (cd komplett && zip -q -r "../obsidian-jarvis-komplett-${VERSION}.zip" jarvis-ai-komplett)
+          ls -l obsidian-jarvis-*.zip
+      - name: Release mit Plugin-Dateien anlegen
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Jarvis AI für Obsidian ${{ github.ref_name }}
+          body: |
+            Fertiges Obsidian-Paket **Jarvis AI (lokal + Top-Cloud)** — automatisch gebaut und getestet aus diesem Tag.
+
+            ### Installation über BRAT (empfohlen)
+            1. Community-Plug-in **BRAT** installieren (Einstellungen → Community-Plugins → Durchsuchen → BRAT).
+            2. `Strg/Cmd+P` → **BRAT: Add a beta plugin for testing** → `${{ github.repository }}` → bestätigen.
+            3. Einstellungen → Community-Plugins → **Jarvis AI** aktivieren.
+            4. `Strg/Cmd+P` → **Jarvis: Chat öffnen**.
+
+            ### Installation von Hand
+            `main.js`, `manifest.json` und `styles.css` herunterladen und in
+            `.obsidian/plugins/jarvis-ai/` des Vaults kopieren, Obsidian neu laden, Plug-in aktivieren.
+
+            ### Enthalten
+            - 🏠 lokal über Ollama · ⚡ Auto mit automatischem Ausweichen · ☁️ Cloud (Claude, GPT, Gemini, OpenRouter, HuggingFace, n8n)
+            - ⚡ Maximum (Top-Modelle + Prüflauf) und 🔮 Orakel (mehrere Modelle prüfen die Antwort)
+            - 🛠️ Werkzeuge: Internet, Vault schreiben, Rechner, Befehle, GitHub, HuggingFace, n8n, MCP
+            - Fragen an den Vault mit Quellenangaben, private Notizen bleiben unberührt
+            - GitHub-Sicherung des Vaults mit Vorschau und Wiederherstellung
+            - Vor jedem Release: Typprüfung und die vollständige Testreihe in der CI
+          files: |
+            obsidian-jarvis/main.js
+            obsidian-jarvis/manifest.json
+            obsidian-jarvis/styles.css
+            obsidian-jarvis/obsidian-jarvis-*.zip
+
+      - name: BRAT-Installierbarkeit des Release prüfen
+        working-directory: obsidian-jarvis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for versuch in 1 2 3; do
+            if node install/pruefe-brat.mjs "${{ github.repository }}" "${{ github.ref_name }}" --streng; then
+              exit 0
+            fi
+            echo "Versuch ${versuch} fehlgeschlagen - warte 15 Sekunden..."
+            sleep 15
+          done
+          echo "Das Release ist nicht sauber installierbar - siehe Meldungen oben."
+          exit 1
+
