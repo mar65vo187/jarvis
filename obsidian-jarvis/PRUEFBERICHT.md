@@ -1,6 +1,6 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.2.0
+# Prüfbericht — Jarvis AI für Obsidian 2.4.0
 
-Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
+Stand: 8. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
 **was nicht** — ohne Beschönigung.
 
@@ -15,9 +15,10 @@ GitHub, HuggingFace und n8n. TypeScript läuft im `strict`-Modus fehlerfrei.
 Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0, 10 aus 2.1 und
 4 aus 2.2 (siehe unten).
 
-**Neu in 2.2.0:** die Anmeldung per Geräte-Code (kein Token mehr von Hand), Auswahl und
-Neuanlegen von Repositories aus dem Plugin heraus, Rechteprüfung, automatischer
-Konflikt-Auflöser beim Sichern und der Hinweis auf neuere Inhalte beim Start.
+**Neu in 2.4.0:** wiederhergestellter GitHub-Fernzugriff in Obsidian: Anmeldung per
+Geräte-Code, Repository-Auswahl und -Anlage, Rechteprüfung, Konflikterkennung beim
+Sichern sowie ein Hinweis auf neuere Inhalte vom zweiten Rechner. Wiederherstellung
+bleibt ausdrücklich manuell und vorschaugestützt.
 
 ---
 
@@ -393,9 +394,15 @@ und legt vor einem Update eine Sicherung der alten Dateien an.
 8. **Orakel**: Modus 🔮 **Orakel** wählen und dieselbe Frage stellen. Erwartung: kurze
    Wartezeit, dann „🔮 von mehreren Modellen geprüft" in der Metazeile — vorausgesetzt,
    es sind mindestens zwei Cloud-Anbieter aktiv.
-9. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
-   Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
-   verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).
-10. **Obsidian-Werkzeug**: Eine Notiz öffnen, einen Satz markieren und fragen: „Was steht in
+9. **GitHub-Fernzugriff (zwischen zwei Geräten)**: Einmalig eine OAuth-App mit aktiviertem
+   Device Flow anlegen und deren Client-ID in Jarvis eintragen (oder einen GitHub-Token
+   verwenden). Verbinden, ein privates Repository auswählen und „Jetzt sichern" mit
+   Vorschau ausführen. Auf dem zweiten Gerät dasselbe Repository auswählen, „Prüfen, ob
+   neuere Inhalte bereitstehen" und anschließend „Wiederherstellen" mit Vorschau testen.
+   Erwartung: neuere Inhalte werden gemeldet und erst nach Bestätigung geschrieben.
+10. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
+    Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
+    verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).
+11. **Obsidian-Werkzeug**: Eine Notiz öffnen, einen Satz markieren und fragen: „Was steht in
     meiner geöffneten Notiz?" Erwartung: Jarvis nennt Pfad und Inhalt. Mit eingestelltem
     Tagesnotizen-Ordner: „Häng an meine Tagesnotiz an: …" — der Eintrag landet wirklich dort.

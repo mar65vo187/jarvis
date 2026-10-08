@@ -6,6 +6,12 @@ Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antwor
 er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
 ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
+**Neu in 2.4.0 — GitHub-Fernzugriff:** Verbinde dein Konto per Geräte-Code, wähle dein
+Repository direkt in Obsidian aus und prüfe, ob ein anderer Rechner neuere Inhalte
+hochgeladen hat. Gleichzeitige Änderungen werden erkannt; Wiederherstellen zeigt immer
+eine Vorschau, bevor Dateien in den Vault geschrieben werden. Die Einrichtung steht in
+[GitHub-Anbindung](#9-github-anbindung).
+
 **Neu in 2.1 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
 Seiten, liest und schreibt Notizen, rechnet, liest Dateien, führt auf dem Desktop Befehle
 aus, liest Dateien und Aufgaben aus deinem GitHub-Repository, findet Modelle auf
@@ -17,9 +23,9 @@ kommen dazu: **Maximum** (immer die stärksten Modelle, mit Prüflauf) und **Ora
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.1.2 |
+| **Version** | 2.4.0 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 165 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 185 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -327,16 +333,16 @@ auch auf weiteren Rechnern. **Trennen** entfernt den gespeicherten Schlüssel so
 ### Verhalten
 
 - Ein Commit pro Sicherung, nur geänderte Dateien (Git-Hash-Vergleich).
-- **Konflikte löst Jarvis selbst**: hat ein zweiter Rechner inzwischen hochgeladen,
-  meldet GitHub „non-fast-forward" — Jarvis holt den neuen Stand und versucht es
-  automatisch erneut, statt mit einer kryptischen Meldung abzubrechen.
+- **Konflikte erkennt Jarvis**: hat ein zweiter Rechner inzwischen hochgeladen,
+  liest Jarvis den aktuellen Stand neu und versucht die Sicherung einmal erneut. Änderungen
+  an anderen Dateien bleiben erhalten; bei derselben Datei gilt die lokale Fassung (es gibt
+  keinen inhaltlichen Text-Merge). Bei einem zweiten Konflikt zuerst wiederherstellen.
 - **Neuer-Stand-Prüfung**: auf Wunsch meldet Jarvis beim Start, wenn auf GitHub neuere
   Commits liegen als hier gesichert wurden (Einstellung *Beim Start prüfen*, oder Befehl
   *GitHub: Prüfen, ob neuere Inhalte bereitstehen*). Überschrieben wird nie automatisch.
 - GitHub Enterprise: unter **Werkzeuge → GitHub-API-Adresse** die eigene Adresse
   eintragen — Sicherung, Wiederherstellung und Werkzeuge nutzen sie dann gemeinsam.
 
-- Ein Commit pro Sicherung, nur geänderte Dateien (Git-Hash-Vergleich).
 - Immer ausgeschlossen: `.git`, `.trash`, `node_modules`, Plugin-Zwischenspeicher.
 - Standard: nur Markdown — **die gelernten Notizen und der Vault-Index sind dadurch mit
   dabei** und überleben Rechnerwechsel und Neuinstallation.
@@ -409,7 +415,7 @@ auch auf weiteren Rechnern. **Trennen** entfernt den gespeicherten Schlüssel so
 cd obsidian-jarvis
 npm ci
 npm run typecheck   # TypeScript strict
-npm test            # 165 Tests; baut vorher automatisch das Bündel
+npm test            # 185 Tests; baut vorher automatisch das Bündel
 npm run build       # erzeugt main.js
 ```
 
@@ -432,7 +438,7 @@ src/
                          connect.ts (Anmeldefenster)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
   obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
-tests/                   165 Tests in 9 Dateien inkl. Ende-zu-Ende-Tests auf main.js
+tests/                   185 Tests in 10 Dateien inkl. Ende-zu-Ende-Tests auf main.js
                          (Werkzeuge, Internet, GitHub, HuggingFace, n8n)
 ```
 
@@ -446,7 +452,7 @@ im Manifest, Ladbarkeit des Bündels):
 
 ```bash
 node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
-node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.2 --streng
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.4.0 --streng
 ```
 
 Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den
