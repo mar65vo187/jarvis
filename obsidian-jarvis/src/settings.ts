@@ -3,6 +3,7 @@ import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type { CloudProviderId, JarvisSettings, ModelInfo } from './types';
 import type { Brain } from './brain';
 import { CLOUD_ORDER_LABELS } from './brain';
+import { verbindungsText } from './github/connect';
 
 export const DEFAULT_SETTINGS: JarvisSettings = {
   routeMode: 'auto',
@@ -159,6 +160,10 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
     backupOnChange: false,
     mirrorDelete: false,
     onlyMarkdown: true,
+    checkRemoteOnStart: false,
+    oauthClientId: '',
+    login: '',
+    scopes: '',
     lastCommitSha: '',
     lastBackupAt: '',
     lastBackupIso: '',
@@ -218,6 +223,16 @@ export function mergeSettings(loaded: DeepPartial<JarvisSettings> | null | undef
   return merged;
 }
 
+/** Ein Repository aus der Kontoliste (für die Auswahl in den Einstellungen). */
+export interface GithubRepoChoice {
+  fullName: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private?: boolean;
+  pushedAt?: string;
+}
+
 /** Schlüssel-IDs: Cloud-Anbieter plus GitHub. */
 export type KeyId = CloudProviderId | 'github';
 
@@ -233,6 +248,11 @@ export interface SettingsHost {
   githubBackup(): Promise<void>;
   githubRestore(): Promise<void>;
   githubTest(): Promise<string>;
+  githubAccount(): Promise<{ ok: boolean; message: string }>;
+  githubConnect(): Promise<void>;
+  githubDisconnect(): Promise<void>;
+  githubRepos(): Promise<Array<GithubRepoChoice>>;
+  githubCreateRepo(name: string, isPrivate: boolean): Promise<GithubRepoChoice | null>;
   testEverything(): Promise<string[]>;
   indexStats(): { files: number; chunks: number; embedded: number; embeddingModel: string | null };
   resetIndex(): Promise<void>;
@@ -249,6 +269,8 @@ export interface SettingsHost {
 
 export class JarvisSettingTab extends PluginSettingTab {
   private host: SettingsHost;
+  /** Zuletzt geladene Repositories des Kontos (für die Auswahl unten). */
+  private repoListe: GithubRepoChoice[] = [];
 
   constructor(app: App, host: SettingsHost) {
     super(app, host as never);
@@ -1271,6 +1293,129 @@ export class JarvisSettingTab extends PluginSettingTab {
     });
     const github = this.host.settings.github;
 
+    // --- Verbindung (ein Knopf statt Token-Bastelei) ---
+    new Setting(containerEl)
+      .setName('Verbindung')
+      .setDesc(
+        verbindungsText({
+          token: this.host.getKey('github'),
+          login: github.login ?? '',
+          scopes: github.scopes ?? '',
+          owner: github.owner,
+          repo: github.repo,
+        }),
+      )
+      .addButton((button) =>
+        button
+          .setButtonText('Mit GitHub verbinden')
+          .setCta()
+          .onClick(async () => {
+            await this.host.githubConnect();
+            this.display();
+          }),
+      )
+      .addButton((button) =>
+        button.setButtonText('Rechte prüfen').onClick(async () => {
+          const ergebnis = await this.host.githubAccount();
+          new Notice(ergebnis.message, 12000);
+        }),
+      )
+      .addButton((button) =>
+        button.setButtonText('Trennen').onClick(async () => {
+          await this.host.githubDisconnect();
+          this.repoListe = [];
+          this.display();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('OAuth-Client-ID (einmalig, für die Anmeldung per Code)')
+      .setDesc(
+        'Auf github.com → Einstellungen → Developer settings → OAuth Apps → "New OAuth App": ' +
+          'Name frei, Homepage https://github.com/mar65vo187/jarvis, Callback http://localhost, Haken bei ' +
+          '"Enable Device flow". Danach die Client-ID hier eintragen. Alternativ unten einen Token von Hand einfügen.',
+      )
+      .addText((text) => {
+        text.inputEl.type = 'password';
+        text.setPlaceholder('Iv1.… (leer = Knopf zeigt die Anleitung)');
+        text.setValue(github.oauthClientId ?? '');
+        text.onChange(async (value) => {
+          github.oauthClientId = value.trim();
+          await this.save();
+        });
+        return text;
+      });
+
+    // --- Ziel-Repository: auswählen oder anlegen ---
+    new Setting(containerEl)
+      .setName('Repository auswählen')
+      .setDesc(
+        this.repoListe.length
+          ? `${this.repoListe.length} Repository(ies) geladen. Auswahl trägt Benutzer, Namen und Branch ein.`
+          : 'Lädt deine Repositories aus dem Konto — die Auswahl trägt Benutzer, Namen und Branch automatisch ein.',
+      )
+      .addButton((button) =>
+        button.setButtonText('Repositories laden').onClick(async () => {
+          const liste = await this.host.githubRepos();
+          if (liste.length) {
+            this.repoListe = liste;
+            new Notice(`${liste.length} Repository(ies) geladen.`, 8000);
+            this.display();
+          }
+        }),
+      );
+
+    if (this.repoListe.length) {
+      const aktuell = `${github.owner}/${github.repo}`;
+      new Setting(containerEl)
+        .setName('Deine Repositories')
+        .setDesc('Zuletzt genutzte zuerst.')
+        .addDropdown((dropdown) => {
+          const optionen: Record<string, string> = {};
+          for (const repo of this.repoListe) {
+            optionen[repo.fullName] = `${repo.fullName}${repo.private ? ' (privat)' : ''}`;
+          }
+          if (aktuell !== '/' && !optionen[aktuell]) optionen[aktuell] = `${aktuell} (eingetragen)`;
+          dropdown.addOptions(optionen);
+          dropdown.setValue(aktuell);
+          dropdown.onChange(async (value) => {
+            const repo = this.repoListe.find((eintrag) => eintrag.fullName === value);
+            if (!repo) return;
+            github.owner = repo.owner;
+            github.repo = repo.name;
+            github.branch = repo.defaultBranch || 'main';
+            github.enabled = true;
+            await this.save();
+            new Notice(`Ziel: ${repo.fullName} (Branch ${github.branch}).`, 8000);
+            this.display();
+          });
+        });
+    }
+
+    let neuerRepoName = 'jarvis-vault';
+    new Setting(containerEl)
+      .setName('Neues Repository anlegen')
+      .setDesc('Legt ein privates Repository an (mit README, damit der Branch sofort existiert) und trägt es als Ziel ein.')
+      .addText((text) => {
+        text.setValue(neuerRepoName);
+        text.onChange((value) => {
+          neuerRepoName = value.trim() || 'jarvis-vault';
+        });
+        return text;
+      })
+      .addButton((button) =>
+        button.setButtonText('Anlegen').onClick(async () => {
+          const repo = await this.host.githubCreateRepo(neuerRepoName, true);
+          if (repo) {
+            this.repoListe = [
+              repo,
+              ...this.repoListe.filter((eintrag) => eintrag.fullName !== repo.fullName),
+            ];
+            this.display();
+          }
+        }),
+      );
+
     new Setting(containerEl)
       .setName('GitHub-Sicherung aktiv')
       .setDesc('Wenn aus, wird nichts hochgeladen und nichts heruntergeladen.')
@@ -1283,7 +1428,7 @@ export class JarvisSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('GitHub-Benutzer (Owner)')
-      .setDesc('Zum Beispiel mar65vo187')
+      .setDesc('Wird beim Verbinden oder Auswählen eines Repositories automatisch eingetragen (z. B. mar65vo187).')
       .addText((text) =>
         text.setValue(github.owner).onChange(async (value) => {
           github.owner = value.trim();
@@ -1293,7 +1438,7 @@ export class JarvisSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Repository-Name')
-      .setDesc('Zum Beispiel jarvis-vault. Das Repository muss existieren.')
+      .setDesc('Zum Beispiel jarvis-vault. Wird beim Auswählen oder Anlegen automatisch eingetragen.')
       .addText((text) =>
         text.setValue(github.repo).onChange(async (value) => {
           github.repo = value.trim();
@@ -1302,7 +1447,7 @@ export class JarvisSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('GitHub-Token (Feingranular, nur Inhalte)')
+      .setName('GitHub-Token von Hand (Alternative zur Anmeldung)')
       .setDesc(
         `Aktuell: ${this.maskKey(this.host.getKey('github'))}. Auf github.com/settings/personal-access-tokens erstellen: ` +
           'Repository access = nur dieses Repository, Berechtigung "Contents" = Read and write. ' +
@@ -1377,6 +1522,16 @@ export class JarvisSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(github.backupOnChange).onChange(async (value) => {
           github.backupOnChange = value;
+          await this.save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Beim Start prüfen, ob GitHub neuer ist')
+      .setDesc('Meldet sich nach dem Start, wenn auf GitHub neuere Commits liegen (z. B. vom zweiten Rechner). Es wird nichts automatisch überschrieben.')
+      .addToggle((toggle) =>
+        toggle.setValue(github.checkRemoteOnStart ?? false).onChange(async (value) => {
+          github.checkRemoteOnStart = value;
           await this.save();
         }),
       );

@@ -265,3 +265,28 @@
   min-height: 140px;
   font-family: var(--font-text);
 }
+
+/* GitHub-Anmeldung per Geräte-Code */
+.jarvis-device-code {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-larger);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  padding: 14px 10px;
+  margin: 10px 0;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  user-select: all;
+}
+
+.jarvis-steps {
+  margin: 8px 0 4px 18px;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.jarvis-steps li {
+  margin-bottom: 6px;
+}

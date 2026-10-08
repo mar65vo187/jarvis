@@ -1,19 +1,24 @@
-# Prüfbericht — Jarvis AI für Obsidian 2.1.2
+# Prüfbericht — Jarvis AI für Obsidian 2.4.0
 
-Stand: 7. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
+Stand: 8. Oktober 2026 · alle Angaben beziehen sich auf den ausgelieferten Stand
 (`main.js` aus diesem Ordner). Der Bericht beschreibt, **was geprüft ist** und
 **was nicht** — ohne Beschönigung.
 
 ## Kurzfassung
 
-**165 Tests in 9 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
+**185 Tests in 10 Dateien, alle grün** (`npm test`; baut vorher automatisch das Bündel).
 Geprüft wurde gegen echte HTTP-Server auf `127.0.0.1` (kein Attrappen-Netzwerk), mit
 echten Git-Objekt-Hashes, einem echten MCP-Kindprozess, echtem DOM und Ende-zu-Ende-Tests
 auf der ausgelieferten Datei `main.js` — inklusive Werkzeugeinsatz, Internetsuche,
 GitHub, HuggingFace und n8n. TypeScript läuft im `strict`-Modus fehlerfrei.
 
-Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0 plus 10 aus 2.1
-(siehe unten).
+Gefundene und **behobene** Fehler während der Entwicklung: 8 aus 2.0, 10 aus 2.1 und
+4 aus 2.2 (siehe unten).
+
+**Neu in 2.4.0:** wiederhergestellter GitHub-Fernzugriff in Obsidian: Anmeldung per
+Geräte-Code, Repository-Auswahl und -Anlage, Rechteprüfung, Konflikterkennung beim
+Sichern sowie ein Hinweis auf neuere Inhalte vom zweiten Rechner. Wiederherstellung
+bleibt ausdrücklich manuell und vorschaugestützt.
 
 ---
 
@@ -146,20 +151,47 @@ Abdeckung von Stichwort- **und** Vektorsuche, Nachziehen geänderter/gelöschter
 Neustart über den Zwischenspeicher, Kontextbudget und Vielfalt (max. 2 Abschnitte je
 Notiz), Prompt-Regeln gegen Erfindungen.
 
-## 6. GitHub (`tests/github.test.ts`, 10 Tests)
+## 6. GitHub — Sichern (`tests/github.test.ts`, 10 Tests)
 
 Gegen einen nachgebauten Git-Data-Server mit echten Hashes: SHA-1-Übereinstimmung mit
 Git (inkl. reiner JavaScript-Umsetzung für Mobilgeräte), erste Sicherung, zweite
 Sicherung ohne Übertragung, Änderungserkennung, Löschen nur auf Wunsch, Unterordner,
 „nur Markdown", Wiederherstellung (neu, geändert, unverändert), klare Fehlermeldungen.
 
-## 7. Oberfläche (`tests/ui.test.ts`, 12 Tests)
+## 6b. GitHub — Anmeldung, Konto, Repositories (`tests/github-login.test.ts`, 17 Tests)
+
+Gegen einen nachgebauten GitHub-Server (Konto, Repository-Liste, Geräte-Code-Endpunkte):
+
+- **Geräte-Code-Ablauf**: Code wird angefordert und angezeigt, `authorization_pending`
+  führt zum Weiterwarten, `slow_down` verlängert die Wartezeit messbar (5 s → 10 s),
+  `expired_token` und `access_denied` werden als verständliche deutsche Meldung
+  weitergegeben, ohne Client-ID erscheint die Anleitung statt eines Fehlers.
+- **Abbruch**: überschreitet der Ablauf seine Gültigkeit, bricht Jarvis ab, statt
+  endlos weiterzufragen.
+- **Konto und Rechte**: Benutzername und gemeldete Rechte werden gelesen (Rechte stehen
+  im Antwortkopf `x-oauth-scopes`); fehlt Schreibrecht, steht das klar in der Meldung;
+  ein abgelehnter Schlüssel (401 „Bad credentials") wird übersetzt.
+- **Repositories**: Liste aus dem Konto (Branch und Sichtbarkeit je Repository) sowie
+  Neuanlegen als privates Repository mit `auto_init`; ein doppelter Name wird als
+  „gibt es bereits" gemeldet.
+- **Konflikte**: meldet GitHub beim Setzen des Branch „non-fast-forward" (422), holt
+  Jarvis den Stand neu und sichert erneut — der zweite Versuch steht im Protokolltext.
+  Schlägt auch der zweite Versuch fehl, erscheint eine verständliche Meldung mit
+  Handlungsempfehlung statt „HTTP 422".
+- **Neuer-Stand-Prüfung**: der letzte Commit auf dem Branch wird erkannt (auch wenn er
+  von einem zweiten Rechner stammt).
+- **GitHub Enterprise**: eine eigene API-Adresse wird verwendet.
+
+## 7. Oberfläche (`tests/ui.test.ts`, 17 Tests)
 
 Aufbau der Bedienelemente, Modellwahl schaltet den Modus mit, Standardwert der
 Notiz-Option, Streaming-Antwort mit Quellenchips und Metazeile (Modell, Dauer, Token,
 Qualität), Fehlerfall mit Hilfestellung und Cloud-Retry, Abbruch, Ausweichhinweis,
 Quellenklick, Aufräumen beim Schließen, Verlaufsverwaltung (Titel, Wechsel, Löschen,
-Begrenzung auf 40 Beiträge).
+Begrenzung auf 40 Beiträge). Neu: die Einstellungsseite zeigt den Verbindungsbereich
+(„Mit GitHub verbinden", Rechte prüfen, Client-ID, Repository-Auswahl und -Neuanlegen)
+und das Anmeldefenster zeigt den Code aus der Geräte-Code-Antwort an — bzw. ohne
+Client-ID die Anleitung.
 
 ## 8. Werkzeuge (`tests/tools.test.ts`, 52 Tests)
 
@@ -271,6 +303,24 @@ In Version 2.1 zusätzlich gefunden und behoben:
     Einstellungsseite und in den Oberflächen-Werkzeugen unbemerkt bleiben können. Der
     Nachbau ist jetzt näher am Original und prüft genau diese Wege.
 
+In Version 2.2 zusätzlich gefunden und behoben:
+
+20. **Token von Hand war die einzige Möglichkeit.** Wer sich nicht mit
+    Personal-Access-Tokens auskennt, scheiterte an der Einrichtung. Jarvis kann sich
+    jetzt selbst per Geräte-Code anmelden (OAuth Device Flow) — mit verständlichen
+    Meldungen für „Code abgelaufen", „abgelehnt" und „keine Client-ID".
+21. **GitHub meldet „non-fast-forward" (HTTP 422)**, sobald ein zweiter Rechner
+    zwischenzeitlich hochgeladen hat. Die Sicherung brach mit „HTTP 422" ab, obwohl
+    nichts verloren war. Jetzt holt Jarvis den neuen Stand und sichert erneut; erst
+    wenn das wiederholt fehlschlägt, kommt eine Meldung mit Handlungsempfehlung.
+22. **Rechte wurden nie geprüft.** Ein Schlüssel ohne Schreibrecht fiel erst beim
+    Sichern auf, und dann nur als „HTTP 403". Jetzt werden Konto und Rechte vorab
+    gelesen (`/user` samt `x-oauth-scopes`) und fehlendes Schreibrecht wird klar benannt.
+    Ein abgelehnter Schlüssel (401) wird übersetzt statt als „HTTP 401" weitergereicht.
+23. **Die GitHub-API-Adresse galt nur für die Werkzeuge**, nicht für die
+    Vault-Sicherung — bei GitHub Enterprise schlug die Sicherung fehl. Beide Wege
+    nutzen jetzt dieselbe einstellbare Adresse.
+
 ## 11. Nachprüfung des echten Releases (`install/pruefe-brat.mjs`)
 
 Die veröffentlichte Version wurde mit echten Anfragen an GitHub geprüft — in der
@@ -344,9 +394,15 @@ und legt vor einem Update eine Sicherung der alten Dateien an.
 8. **Orakel**: Modus 🔮 **Orakel** wählen und dieselbe Frage stellen. Erwartung: kurze
    Wartezeit, dann „🔮 von mehreren Modellen geprüft" in der Metazeile — vorausgesetzt,
    es sind mindestens zwei Cloud-Anbieter aktiv.
-9. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
-   Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
-   verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).
-10. **Obsidian-Werkzeug**: Eine Notiz öffnen, einen Satz markieren und fragen: „Was steht in
+9. **GitHub-Fernzugriff (zwischen zwei Geräten)**: Einmalig eine OAuth-App mit aktiviertem
+   Device Flow anlegen und deren Client-ID in Jarvis eintragen (oder einen GitHub-Token
+   verwenden). Verbinden, ein privates Repository auswählen und „Jetzt sichern" mit
+   Vorschau ausführen. Auf dem zweiten Gerät dasselbe Repository auswählen, „Prüfen, ob
+   neuere Inhalte bereitstehen" und anschließend „Wiederherstellen" mit Vorschau testen.
+   Erwartung: neuere Inhalte werden gemeldet und erst nach Bestätigung geschrieben.
+10. **GitHub-Werkzeug**: Mit eingerichteter GitHub-Anbindung fragen: „Zeig mir die offenen
+    Aufgaben in unserem Repository." Erwartung: eine echte Liste (oder eine klare,
+    verständliche Fehlermeldung, wenn der Schlüssel das nicht darf).
+11. **Obsidian-Werkzeug**: Eine Notiz öffnen, einen Satz markieren und fragen: „Was steht in
     meiner geöffneten Notiz?" Erwartung: Jarvis nennt Pfad und Inhalt. Mit eingestelltem
     Tagesnotizen-Ordner: „Häng an meine Tagesnotiz an: …" — der Eintrag landet wirklich dort.

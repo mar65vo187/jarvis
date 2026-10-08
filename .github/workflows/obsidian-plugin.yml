@@ -105,6 +105,12 @@ jobs:
             `main.js`, `manifest.json` und `styles.css` herunterladen und in
             `.obsidian/plugins/jarvis-ai/` des Vaults kopieren, Obsidian neu laden, Plug-in aktivieren.
 
+            ### GitHub-Fernzugriff in Obsidian
+            In den Jarvis-Einstellungen unter **GitHub** verbinden, Repositories auswählen und den Stand zwischen Geräten prüfen.
+            Für die Anmeldung per Geräte-Code einmalig eine eigene GitHub-OAuth-App mit aktiviertem Device Flow anlegen und
+            deren Client-ID eintragen (Anleitung in `obsidian-jarvis/README.md`); alternativ einen GitHub-Token von Hand setzen.
+            Wiederherstellen zeigt vor jedem Schreiben eine Vorschau und überschreibt nichts automatisch.
+
             ### Enthalten
             - 🏠 lokal über Ollama · ⚡ Auto mit automatischem Ausweichen · ☁️ Cloud (Claude, GPT, Gemini, OpenRouter, HuggingFace, n8n)
             - ⚡ Maximum (Top-Modelle + Prüflauf) und 🔮 Orakel (mehrere Modelle prüfen die Antwort)

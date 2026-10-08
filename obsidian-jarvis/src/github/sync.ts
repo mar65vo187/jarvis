@@ -5,7 +5,9 @@
  * Nur geänderte Dateien werden übertragen (Vergleich über den Git-Hash).
  * Wiederherstellung: Vorschau, dann werden nur geänderte Dateien geschrieben.
  */
-import { GithubClient, gitBlobSha, textToBase64, bytesToBase64 } from './client';
+import { GithubClient, gitBlobSha, textToBase64, bytesToBase64, type GithubRepoEntry } from './client';
+import { hasContentsWrite } from './oauth';
+import { HttpError } from '../util/http';
 import type { GithubSettings } from '../types';
 
 export interface VaultFileSystem {
@@ -38,6 +40,13 @@ export interface SyncOutcome {
 }
 
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
+
+/** Meldet GitHub, dass der Branch inzwischen woanders weitergelaufen ist? */
+function isNonFastForward(error: unknown): boolean {
+  if (!(error instanceof HttpError) || error.status !== 422) return false;
+  const text = `${error.body ?? ''} ${error.message ?? ''}`;
+  return /fast.?forward|is at .* but expected|does not match/i.test(text);
+}
 
 export class GithubSync {
   constructor(
@@ -91,6 +100,59 @@ export class GithubSync {
       return { ok: true, message: parts.join('\n') };
     } catch (error) {
       return { ok: false, message: `GitHub: ${(error as Error).message}` };
+    }
+  }
+
+  /** Konto und Rechte prüfen — ohne Repository-Angaben nutzbar. */
+  async account(): Promise<{ ok: boolean; message: string; login?: string; scopes?: string[] }> {
+    try {
+      const konto = await this.client.whoami();
+      const parts = [
+        konto.name ? `✅ Angemeldet als ${konto.login} (${konto.name}).` : `✅ Angemeldet als ${konto.login}.`,
+      ];
+      if (konto.scopes.length) {
+        parts.push(
+          hasContentsWrite(konto.scopes)
+            ? `Rechte: ${konto.scopes.join(', ')} — Inhalte schreiben ist erlaubt.`
+            : `⚠️ Rechte: ${konto.scopes.join(', ')} — es fehlt "repo" (Inhalte lesen und schreiben). ` +
+                'Bitte neu verbinden oder einen Schlüssel mit Schreibrecht verwenden.',
+        );
+      } else {
+        parts.push('Rechte: feingranularer Schlüssel (GitHub meldet die Rechte nicht mit — geprüft wird beim Sichern).');
+      }
+      return {
+        ok: true,
+        message: parts.join('\n'),
+        login: konto.login,
+        scopes: konto.scopes,
+      };
+    } catch (error) {
+      return { ok: false, message: `GitHub: ${(error as Error).message}` };
+    }
+  }
+
+  /** Letzter Commit auf dem Sicherungsbranch (null, wenn der Branch fehlt). */
+  async remoteHead(): Promise<string | null> {
+    this.validate();
+    const settings = this.settings();
+    return this.client.branchHead(settings.owner, settings.repo, settings.branch);
+  }
+
+  /** Eigene Repositories auflisten (für die Auswahl in den Einstellungen). */
+  async repos(): Promise<GithubRepoEntry[]> {
+    try {
+      return await this.client.listRepos();
+    } catch (error) {
+      throw new Error(`Repository-Liste konnte nicht geladen werden: ${(error as Error).message}`);
+    }
+  }
+
+  /** Neues Repository anlegen. */
+  async createRepo(options: { name: string; isPrivate?: boolean }): Promise<GithubRepoEntry> {
+    try {
+      return await this.client.createRepo(options);
+    } catch (error) {
+      throw new Error(`${(error as Error).message}`);
     }
   }
 
@@ -150,8 +212,39 @@ export class GithubSync {
     return { total: files.length, added, changed, unchanged, deleted, bytes };
   }
 
-  /** Dateien nach GitHub sichern (ein Commit). */
+  /**
+   * Dateien nach GitHub sichern (ein Commit).
+   *
+   * Meldet GitHub "non-fast-forward" (HTTP 422), hat ein anderer Rechner inzwischen
+   * etwas hochgeladen. Dann wird der Stand einmal neu geholt und erneut gesichert,
+   * statt mit einer kryptischen Meldung abzubrechen.
+   */
   async backup(options: { message?: string; applyDeletions?: boolean } = {}): Promise<SyncOutcome> {
+    try {
+      return await this.runBackup(options);
+    } catch (error) {
+      if (isNonFastForward(error)) {
+        try {
+          const wiederholt = await this.runBackup(options);
+          return {
+            ...wiederholt,
+            detail: `${wiederholt.detail ?? ''} · nach fremder Änderung automatisch erneut versucht`.trim(),
+          };
+        } catch (zweiterFehler) {
+          if (isNonFastForward(zweiterFehler)) {
+            throw new Error(
+              'Das Repository hat sich während der Sicherung erneut geändert (z. B. durch einen zweiten Rechner). ' +
+                'Bitte zuvor "Wiederherstellen" ausführen oder den Sicherungsbranch wechseln.',
+            );
+          }
+          throw zweiterFehler;
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async runBackup(options: { message?: string; applyDeletions?: boolean }): Promise<SyncOutcome> {
     this.validate();
     const settings = this.settings();
     const started = Date.now();

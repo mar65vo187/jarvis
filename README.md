@@ -4,7 +4,7 @@ Persönlicher Assistent mit deutschem Dashboard, Werkzeugen, SQLite-Gedächtnis,
 Missionen, Zeitplänen, PC-Steuerung, Telegram, GitHub-Remote-Kanal und einem
 benchmark-gesteuerten Agent-Upgrade-System.
 
-## Obsidian-Plug-in: Jarvis AI (lokal + Top-Cloud + lernfähig) — v2.0.1
+## Obsidian-Plug-in: Jarvis AI (lokal + Top-Cloud + lernfähig) — v2.4.0
 
 Im Ordner [`obsidian-jarvis/`](obsidian-jarvis/) liegt ein fertiges Obsidian-Plug-in,
 das dieselbe Idee direkt in deinen Vault bringt:
@@ -23,10 +23,10 @@ das dieselbe Idee direkt in deinen Vault bringt:
   Rechnerwechsel), holt Jarvis es beim Start automatisch aus diesen Notizen zurück.
 - **Fragen an den Vault** mit Quellenangaben `[Q1]`, hybride Suche (Vektoren + BM25),
   private Notizen (`ki-privat: true`) und ausgeschlossene Ordner werden nie gelesen.
-- **GitHub-Anbindung**: Der Vault wird als echte Commits gesichert und auf einem
-  zweiten Rechner wiederhergestellt (nur geänderte Dateien, Vorschau vor jedem Schreiben).
+- **GitHub-Fernzugriff**: Per Geräte-Code anmelden, Repository in Obsidian auswählen,
+  Änderungen zwischen Rechnern prüfen und den Vault mit Vorschau sichern/wiederherstellen.
 - Befehle für Zusammenfassen, Aufgaben, Verbessern, Übersetzen, Plan, Gegenprüfung.
-- 96 automatische Tests, alle grün – inklusive Ende-zu-Ende-Nachweis des Lernkreislaufs
+- 185 automatische Tests, alle grün – inklusive Ende-zu-Ende-Nachweis des Lernkreislaufs
   (schwache lokale Antwort → Cloud lernt → nächste lokale Antwort ohne Cloud besser)
   und des Wegs nach einer Neuinstallation (Gelerntes kommt aus den Notizen zurück).
   Prüfbericht und ehrliche Grenzen in

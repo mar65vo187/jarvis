@@ -6,6 +6,12 @@ Qualität braucht, holt er sich die stärksten Cloud-Modelle. **Aus deren Antwor
 er dauerhaft**: Er speichert das Gelernte, nutzt es bei späteren Fragen, und baut daraus
 ein besseres lokales Modell. Dazu eine echte GitHub-Anbindung für deinen Vault.
 
+**Neu in 2.4.0 — GitHub-Fernzugriff:** Verbinde dein Konto per Geräte-Code, wähle dein
+Repository direkt in Obsidian aus und prüfe, ob ein anderer Rechner neuere Inhalte
+hochgeladen hat. Gleichzeitige Änderungen werden erkannt; Wiederherstellen zeigt immer
+eine Vorschau, bevor Dateien in den Vault geschrieben werden. Die Einrichtung steht in
+[GitHub-Anbindung](#9-github-anbindung).
+
 **Neu in 2.1 — Jarvis handelt:** Er benutzt Werkzeuge. Er sucht im Internet, liest
 Seiten, liest und schreibt Notizen, rechnet, liest Dateien, führt auf dem Desktop Befehle
 aus, liest Dateien und Aufgaben aus deinem GitHub-Repository, findet Modelle auf
@@ -17,9 +23,9 @@ kommen dazu: **Maximum** (immer die stärksten Modelle, mit Prüflauf) und **Ora
 |---|---|
 | **Plugin-Name** | Jarvis AI (lokal + Top-Cloud) |
 | **Plugin-Kennung** | `jarvis-ai` |
-| **Version** | 2.1.2 |
+| **Version** | 2.4.0 |
 | **Voraussetzung** | Obsidian ab 1.5 (Desktop und Mobil) |
-| **Automatische Tests** | 165 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
+| **Automatische Tests** | 185 Tests, alle grün (siehe [PRUEFBERICHT.md](PRUEFBERICHT.md)) |
 
 ---
 
@@ -278,6 +284,8 @@ diese Cloud-Antworten machen deine lokale KI besser.**
 | Jarvis: Wissensindex neu aufbauen | Notizen neu einlesen |
 | Jarvis: Lokales Modell aus dem Speicher entladen | RAM freigeben |
 | Jarvis: Vault jetzt sichern / wiederherstellen | GitHub mit Vorschau |
+| Jarvis: Mit dem Konto verbinden (Geräte-Code) / Verbindung und Rechte prüfen | GitHub-Anmeldung |
+| Jarvis: Prüfen, ob neuere Inhalte bereitstehen | GitHub-Stand mit diesem Rechner vergleichen |
 | Jarvis: Verbindungen testen | Diagnosebericht |
 
 **Im Chat:** Modus (Lokal/Auto/Cloud), Modellwahl, Aufgabe (Vault-Frage, Gespräch,
@@ -290,7 +298,31 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 
 ## 9. GitHub-Anbindung
 
-### Einmal einrichten
+### Einmal einrichten — Weg A: mit deinem Konto verbinden (empfohlen)
+
+Kein Token-Basteln mehr. Jarvis meldet sich selbst bei deinem GitHub-Konto an:
+
+1. **Einmalig** eine OAuth-App anlegen (dauert eine Minute):
+   <https://github.com/settings/developers> → **OAuth Apps** → **New OAuth App**
+   - Name: `Jarvis AI (Obsidian)`
+   - Homepage: `https://github.com/mar65vo187/jarvis`
+   - Authorization callback URL: `http://localhost` (wird nicht benutzt, muss aber gefüllt sein)
+   - Haken bei **Enable Device flow**
+2. Die angezeigte **Client-ID** kopieren und in Obsidian unter
+   Einstellungen → **Jarvis KI** → **GitHub** → *OAuth-Client-ID* eintragen.
+3. **Mit GitHub verbinden** drücken: Jarvis zeigt einen Code an, du gibst ihn auf
+   <https://github.com/login/device> ein, bestätigst — fertig. Der Schlüssel kommt in
+   den Obsidian-Schlüsseltresor (oder nach `data.json`, wenn es keinen gibt).
+4. Repository wählen: **Repositories laden** → aus der Liste wählen (Owner, Name und
+   Branch werden automatisch eingetragen) — oder **Neues Repository anlegen**, dann legt
+   Jarvis ein privates Repository inklusive README an und trägt es als Ziel ein.
+5. **Rechte prüfen** zeigt dir, als welcher Benutzer Jarvis angemeldet ist und ob der
+   Schlüssel Inhalte schreiben darf. Danach **Jetzt sichern** (mit Vorschau).
+
+Du brauchst die OAuth-App nur **einmal** — danach genügt der Knopf „Mit GitHub verbinden",
+auch auf weiteren Rechnern. **Trennen** entfernt den gespeicherten Schlüssel sofort.
+
+### Einmal einrichten — Weg B: Token von Hand
 
 1. Auf GitHub ein **privates Repository** anlegen, z. B. `mein-vault`.
 2. Feingranularen Token erstellen (<https://github.com/settings/personal-access-tokens>):
@@ -301,6 +333,16 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 ### Verhalten
 
 - Ein Commit pro Sicherung, nur geänderte Dateien (Git-Hash-Vergleich).
+- **Konflikte erkennt Jarvis**: hat ein zweiter Rechner inzwischen hochgeladen,
+  liest Jarvis den aktuellen Stand neu und versucht die Sicherung einmal erneut. Änderungen
+  an anderen Dateien bleiben erhalten; bei derselben Datei gilt die lokale Fassung (es gibt
+  keinen inhaltlichen Text-Merge). Bei einem zweiten Konflikt zuerst wiederherstellen.
+- **Neuer-Stand-Prüfung**: auf Wunsch meldet Jarvis beim Start, wenn auf GitHub neuere
+  Commits liegen als hier gesichert wurden (Einstellung *Beim Start prüfen*, oder Befehl
+  *GitHub: Prüfen, ob neuere Inhalte bereitstehen*). Überschrieben wird nie automatisch.
+- GitHub Enterprise: unter **Werkzeuge → GitHub-API-Adresse** die eigene Adresse
+  eintragen — Sicherung, Wiederherstellung und Werkzeuge nutzen sie dann gemeinsam.
+
 - Immer ausgeschlossen: `.git`, `.trash`, `node_modules`, Plugin-Zwischenspeicher.
 - Standard: nur Markdown — **die gelernten Notizen und der Vault-Index sind dadurch mit
   dabei** und überleben Rechnerwechsel und Neuinstallation.
@@ -337,6 +379,10 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 | „Verbessern nicht möglich" | Es braucht mindestens eine geeignete Lektion (Antwort ≥ 40 Zeichen, nicht als schlecht bewertet) |
 | `jarvis-brain-vX` erscheint nicht | Ollama aktualisieren; der Diagnosebericht sagt es dir |
 | 401/403 | Schlüssel prüfen; bei GitHub Contents = Read and write |
+| „Keine OAuth-Client-ID eingetragen" | Einmalig OAuth-App anlegen (Abschnitt 9, Weg A) — oder Weg B mit Token von Hand |
+| „Code ist abgelaufen" | Erneut auf **Mit GitHub verbinden** — der Code gilt nur wenige Minuten |
+| „Repository … gibt es bereits" | Anderen Namen wählen oder das bestehende Repository aus der Liste wählen |
+| „Repository hat sich während der Sicherung erneut geändert" | Erst **Wiederherstellen** (Vorschau), dann erneut sichern |
 | 429 | Kontingent erschöpft — warten oder Modell wechseln |
 | Wissenssuche findet nichts | Index neu aufbauen, Ausschlüsse prüfen, `ollama pull nomic-embed-text` |
 | Gelerntes versehentlich drin | „Lernen: Was hat Jarvis gelernt?" → schlecht bewerten oder löschen; Markdown-Notiz direkt bearbeiten/löschen |
@@ -369,7 +415,7 @@ Kopfzeile: 🎓 Lernmodell bauen · 🧠 Lernbericht · ⚙️ Einstellungen.
 cd obsidian-jarvis
 npm ci
 npm run typecheck   # TypeScript strict
-npm test            # 165 Tests; baut vorher automatisch das Bündel
+npm test            # 185 Tests; baut vorher automatisch das Bündel
 npm run build       # erzeugt main.js
 ```
 
@@ -387,10 +433,12 @@ src/
   learn/                 types.ts, quality.ts (Messung), store.ts (Lernspeicher),
                          distill.ts (Ollama-Profil), notes.ts (Markdown im Vault)
   chat/                  view.ts (Oberfläche), assistant.ts (Ablauf + Aufwertung + Lernen), session.ts
-  github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen)
+  github/                client.ts (REST), sync.ts (Sichern/Wiederherstellen),
+                         oauth.ts (Anmeldung per Geräte-Code),
+                         connect.ts (Anmeldefenster)
   util/                  http.ts (Streaming + CORS-Ersatzweg), format.ts
   obsidian-bridge.ts     Vault-Zugriff, Zwischenspeicher, Embeddings, Lern-Dateien
-tests/                   165 Tests in 9 Dateien inkl. Ende-zu-Ende-Tests auf main.js
+tests/                   185 Tests in 10 Dateien inkl. Ende-zu-Ende-Tests auf main.js
                          (Werkzeuge, Internet, GitHub, HuggingFace, n8n)
 ```
 
@@ -404,7 +452,7 @@ im Manifest, Ladbarkeit des Bündels):
 
 ```bash
 node install/pruefe-brat.mjs mar65vo187/jarvis                 # neueste Version
-node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.1.2 --streng
+node install/pruefe-brat.mjs mar65vo187/jarvis obsidian-jarvis-2.4.0 --streng
 ```
 
 Das Skript prüft die Release-Dateien `main.js`, `manifest.json`, `styles.css`, den

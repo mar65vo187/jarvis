@@ -144,6 +144,14 @@ export interface GithubSettings {
   mirrorDelete: boolean;
   /** Nur Markdown-Notizen sichern (Anhänge auslassen). */
   onlyMarkdown: boolean;
+  /** Beim Start prüfen, ob GitHub neuere Inhalte hat (zweiter Rechner). */
+  checkRemoteOnStart: boolean;
+  /** OAuth-Client-ID für die Anmeldung per Geräte-Code (eigene OAuth-App). */
+  oauthClientId: string;
+  /** Angemeldeter GitHub-Benutzername (nur Anzeige). */
+  login: string;
+  /** Rechte des Schlüssels, soweit GitHub sie mitteilt (nur Anzeige). */
+  scopes: string;
   /** Letzter erfolgreicher Commit (nur Info). */
   lastCommitSha: string;
   /** Anzeigetext, z. B. "07.10.2026, 18:45". */
