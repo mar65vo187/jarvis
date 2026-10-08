@@ -48,7 +48,7 @@ def strip_prefix(text: str) -> str:
     return _PRIVATE_PREFIX.sub("", text or "", count=1).strip()
 
 
-def sensitive_findings(text: str) -> list[str]:
+def sensitive_findings(text: str, *, private_names: set[str] | None = None) -> list[str]:
     """Persönliche Daten im Text (für Ausgangsschleuse und Lehrer-Fragen)."""
     found = []
     if _has_phone(text or ""):
@@ -56,7 +56,8 @@ def sensitive_findings(text: str) -> list[str]:
     for label, rx in _SENSITIVE:
         if rx.search(text or ""):
             found.append(label)
-    for name in _private_names():
+    names = _private_names() if private_names is None else private_names
+    for name in names:
         if re.search(rf"\b{re.escape(name)}\b", text or "", re.I):
             found.append(f"Name aus privatem Gedächtnis ({name})")
             break
@@ -77,12 +78,28 @@ def _private_names() -> set[str]:
     """Eigennamen aus privaten Gedächtnis-Einträgen (Kontakte usw.) – dürfen nie zum Lehrer."""
     from . import db
     names = set()
-    for r in db.q("SELECT content FROM memory WHERE private=1 ORDER BY id DESC LIMIT 300"):
-        text = decrypt(r["content"])
+    for r in db.q("SELECT id,topic,content FROM memory WHERE private=1 ORDER BY id DESC LIMIT 300"):
+        topic = str(r["topic"] or "")
+        if topic:
+            # Older releases encrypted private content but left its topic readable.
+            # encrypt() also validates any existing marker before considering it ciphertext.
+            try:
+                encrypted_topic = encrypt(topic)
+                if encrypted_topic != topic:
+                    db.ex("UPDATE memory SET topic=? WHERE id=?", (encrypted_topic, r["id"]))
+                    topic = encrypted_topic
+            except Exception:
+                pass
+        text = decrypt(topic) + " " + decrypt(r["content"] or "")
         for w in re.findall(r"\b[A-ZÄÖÜ][a-zäöüß]{2,}\b", text):
             if w.lower() not in _COMMON:
                 names.add(w)
     return names
+
+
+def private_names_from_memory() -> set[str]:
+    """Bekannte private Eigennamen für gebündelte Prüfungen eines ganzen Speichers."""
+    return _private_names()
 
 
 _COMMON = {w.lower() for w in (
@@ -132,9 +149,19 @@ def _get_fernet():
 
 
 def encrypt(text: str) -> str:
-    if text is None or str(text).startswith(_PREFIX):
+    if text is None:
         return text
-    return _PREFIX + _get_fernet().encrypt(str(text).encode("utf-8")).decode("ascii")
+    value = str(text)
+    fernet = _get_fernet()
+    if value.startswith(_PREFIX):
+        try:
+            # Be idempotent for ciphertext, but never trust the marker alone:
+            # user text can legitimately begin with the same prefix.
+            fernet.decrypt(value[len(_PREFIX):].encode("ascii"))
+            return value
+        except Exception:
+            pass
+    return _PREFIX + fernet.encrypt(value.encode("utf-8")).decode("ascii")
 
 
 def decrypt(value: str) -> str:

@@ -5,6 +5,7 @@ import time
 import httpx
 
 from . import config, db, xkiro
+from .errors import CloudConfigError, CloudUnavailable
 
 _lock = asyncio.Semaphore(4)
 _catalog_cache: list[dict] = []
@@ -13,7 +14,7 @@ _catalog_checked = 0.0
 
 def _headers() -> dict:
     if not config.HF_TOKEN:
-        raise RuntimeError("Hugging-Face-Token fehlt. In EINSTELLUNGEN eintragen.")
+        raise CloudConfigError("Hugging-Face-Token fehlt. In EINSTELLUNGEN eintragen.")
     return {"Authorization": f"Bearer {config.HF_TOKEN}", "Content-Type": "application/json"}
 
 
@@ -43,11 +44,15 @@ async def list_model_details(force: bool = False) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=20) as c:
             r = await c.get(f"{config.HF_BASE_URL}/models", headers=headers)
+            if r.status_code in (401, 403, 404):
+                raise CloudConfigError(_clean_error(r))
+            if r.status_code in (402, 429) or r.status_code >= 500:
+                raise CloudUnavailable(_clean_error(r))
             if r.status_code >= 400:
                 raise RuntimeError(_clean_error(r))
             data = r.json()
     except httpx.HTTPError as exc:
-        raise RuntimeError(f"Hugging Face nicht erreichbar: {exc}") from None
+        raise CloudUnavailable(f"Hugging Face nicht erreichbar: {exc}") from None
     rows = data.get("data", []) if isinstance(data, dict) else []
     out = []
     for row in rows:
@@ -127,7 +132,11 @@ async def call(messages, tools=None, max_tokens=None, model=None, reasoning_effo
             try:
                 r = await c.post(f"{config.HF_BASE_URL}/chat/completions", headers=_headers(), json=payload)
             except httpx.HTTPError:
-                raise RuntimeError("Hugging Face nicht erreichbar oder Anfrage abgebrochen.") from None
+                raise CloudUnavailable("Hugging Face nicht erreichbar oder Anfrage abgebrochen.") from None
+            if r.status_code in (401, 403, 404):
+                raise CloudConfigError(_clean_error(r))
+            if r.status_code in (402, 429) or r.status_code >= 500:
+                raise CloudUnavailable(_clean_error(r))
             if r.status_code >= 400:
                 raise RuntimeError(_clean_error(r))
             try:

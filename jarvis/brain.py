@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from . import agents, claude, config, db, huggingface, knowledge, performance, privacy, prompts, xkiro
-from .errors import BudgetExceeded, CloudUnavailable, PrivacyBlocked
+from .errors import BudgetExceeded, CloudConfigError, CloudUnavailable, PrivacyBlocked
 from .tools import all_schemas, run_tool
 
 
@@ -140,6 +140,11 @@ async def _call(messages: list[dict], tools: list[dict] | None = None, max_token
             if provider != "ollama":
                 config.FALLBACK_STATUS.update(active=False, reason="")
             return result
+        except CloudConfigError as exc:
+            # A credential/model setup error is actionable; silently hiding it behind
+            # another provider would make AUTO appear healthy while misconfigured.
+            LAST_PROVIDER.update(provider=provider, model="", error=str(exc)[:300])
+            raise
         except Exception as exc:
             errors.append(f"{provider}: {str(exc)[:220]}")
             LAST_PROVIDER.update(provider=provider, model="", error=str(exc)[:300])
@@ -345,12 +350,14 @@ async def think(messages: list, ctx: dict, extra_system: str = "", max_steps: in
     ctx = ctx if ctx is not None else {}
     if any(m.get("private") for m in history):  # „privat“ = es sind private DATEN im Spiel
         ctx["private"] = True
-    last_user = next((m.get("content", "") for m in reversed(history) if m.get("role") == "user"), "")
+    user_queries = [str(m.get("content", "")) for m in history if m.get("role") == "user"]
+    last_user = user_queries[-1] if user_queries else ""
+    memory_query = "\n".join(user_queries[-4:])[-3000:]
     learned = knowledge.context_block(str(last_user))  # eigenes Wissen (nur herein)
 
     def _system(local: bool) -> str:
         extra = "\n\n".join(x for x in (extra_system, learned) if x)
-        return prompts.system_prompt(extra, local=local)
+        return prompts.system_prompt(extra, local=local, memory_query=memory_query)
 
     system = _system(privacy.must_stay_local(history, ctx) or config.active_provider() == "ollama")
     # Uhrzeit NICHT in den Systemprompt (sonst ändert er sich jede Minute und Ollama kann den

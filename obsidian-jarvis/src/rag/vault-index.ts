@@ -27,8 +27,10 @@ export interface IndexPersist {
 }
 
 export interface Embedder {
-  /** Name des Embedding-Modells oder null, wenn keines verfügbar ist. */
+  /** Name des tatsächlich aufgelösten Embedding-Modells oder null, wenn keines verfügbar ist. */
   modelName(): string | null;
+  /** Provider mit asynchroner Modellsuche kann vor dem Indexlauf das konkrete Modell auflösen. */
+  resolveModel?(): Promise<string | null>;
   embed(texts: string[], signal?: AbortSignal): Promise<number[][] | null>;
 }
 
@@ -284,8 +286,10 @@ export class VaultIndex {
     for (const file of changed) {
       try {
         const text = await this.reader.read(file.path);
+        // Privacy flags live in the complete YAML header. Never truncate before
+        // checking them: a long title/metadata block must not make a private note public.
+        const frontmatter = parseFrontmatter(text);
         const sliced = text.length > this.options.maxNoteBytes ? text.slice(0, this.options.maxNoteBytes) : text;
-        const frontmatter = parseFrontmatter(sliced);
         this.removeFile(file.path);
         if (isPrivateNote(frontmatter)) {
           this.files.set(file.path, { mtime: file.mtime, size: file.size });
@@ -295,18 +299,39 @@ export class VaultIndex {
         pending.push(...next);
         this.files.set(file.path, { mtime: file.mtime, size: file.size });
       } catch {
-        // nicht lesbare Datei überspringen
+        // A changed file may have become private; never keep stale public chunks
+        // when its replacement cannot be read. Missing metadata makes us retry later.
+        this.removeFile(file.path);
       }
     }
 
-    if (pending.length) {
-      this.chunks.push(...pending);
-      await this.embedChunks(pending);
+    if (pending.length) this.chunks.push(...pending);
+
+    let embeddingsChanged = false;
+    const model = this.embedder.resolveModel
+      ? await this.embedder.resolveModel()
+      : this.embedder.modelName();
+    if (model) {
+      if (this.embeddingModel !== model) {
+        // A model's vectors are not comparable with another model's vectors.
+        // Invalidate all of them, then rebuild from every indexed chunk.
+        for (const chunk of this.chunks) delete chunk.vec;
+        this.embeddingModel = model;
+        embeddingsChanged = true;
+      }
+
+      // Also retry chunks left without vectors by a previous transient embedding
+      // failure; otherwise they would stay lexical-only until their note changed.
+      const missing = this.chunks.filter((chunk) => !chunk.vec);
+      if (missing.length) {
+        await this.embedChunks(missing);
+        if (missing.some((chunk) => chunk.vec)) embeddingsChanged = true;
+      }
     }
 
-    if (changed.length || force) {
+    if (changed.length || force || embeddingsChanged) {
       this.updatedAt = Date.now();
-      this.recomputeDocFreq();
+      if (changed.length || force) this.recomputeDocFreq();
       await this.save();
     }
 
@@ -318,27 +343,24 @@ export class VaultIndex {
     this.files.delete(path);
   }
 
-  private async embedChunks(chunks: Chunk[]): Promise<void> {
-    const model = this.embedder.modelName();
-    if (!model) return;
-    if (this.embeddingModel && this.embeddingModel !== model) {
-      // Modell gewechselt -> alle Vektoren verwerfen
-      for (const chunk of this.chunks) delete chunk.vec;
-    }
-    this.embeddingModel = model;
+  private async embedChunks(chunks: Chunk[]): Promise<boolean> {
+    if (!chunks.length) return true;
+    if (!this.embedder.modelName()) return false;
     const batchSize = 24;
     for (let index = 0; index < chunks.length; index += batchSize) {
       const batch = chunks.slice(index, index + batchSize);
       try {
         const vectors = await this.embedder.embed(batch.map((chunk) => `${chunk.heading}\n${chunk.text}`));
-        if (!vectors) return;
+        if (!vectors || vectors.length !== batch.length || vectors.some((vector) =>
+          !vector?.length || vector.some((value) => !Number.isFinite(value)))) return false;
         vectors.forEach((vector, position) => {
-          if (vector?.length) batch[position].vec = Float32Array.from(vector);
+          batch[position].vec = Float32Array.from(vector);
         });
       } catch {
-        return;
+        return false;
       }
     }
+    return true;
   }
 
   private recomputeDocFreq(): void {
@@ -400,7 +422,8 @@ export class VaultIndex {
 
     // Vektoren
     let vectorScores = new Map<Chunk, number>();
-    if (this.embedder.modelName() && this.chunks.some((chunk) => chunk.vec)) {
+    const activeEmbeddingModel = this.embedder.modelName();
+    if (activeEmbeddingModel && this.embeddingModel === activeEmbeddingModel && this.chunks.some((chunk) => chunk.vec)) {
       try {
         const queryVector = (await this.embedder.embed([question], options.signal))?.[0];
         if (queryVector?.length) {

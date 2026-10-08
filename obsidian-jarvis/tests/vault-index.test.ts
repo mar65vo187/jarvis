@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryPersist, MemoryVault, FakeEmbedder } from './helpers/mock-vault';
+import { OllamaEmbedder } from '../src/obsidian-bridge';
+import type { OllamaProvider } from '../src/providers/ollama';
 import {
   VaultIndex,
   chunkNote,
@@ -86,6 +88,142 @@ describe('Wissensindex', () => {
     expect(sources[0].path).toBe('Projekt Alpha.md');
     expect(sources[0].id).toBe('Q1');
     expect(sources[0].text).toContain('15. November');
+  });
+
+  it('erkennt private Frontmatter-Felder auch jenseits der Index-Kürzung', async () => {
+    const vault = new MemoryVault({
+      'Privat.md': `---\ntitle: ${'Metadaten '.repeat(30)}\nki-privat: true\n---\n\nGeheim vertraulicher Inhalt.`,
+    });
+    const index = new VaultIndex(vault, new MemoryPersist(), { ...OPTIONS, maxNoteBytes: 40 }, new FakeEmbedder(null));
+    await index.ensureFresh(true);
+
+    expect(index.noteChunks('Privat.md', 2000)).toHaveLength(0);
+    expect(await index.search('Metadaten Inhalt')).toHaveLength(0);
+  });
+
+  it('verwirft alte öffentliche Chunks, wenn eine geänderte Notiz nicht lesbar ist', async () => {
+    const vault = new MemoryVault({ 'Projekt.md': '# Projekt\n\nPavillonbedarf und Bauplanung.' });
+    const { index } = buildIndex(vault);
+    await index.ensureFresh(true);
+    expect(index.noteChunks('Projekt.md', 2000)).toHaveLength(1);
+
+    vault.touch('Projekt.md', '---\nki-privat: true\n---\n\nGeheime Details.');
+    const read = vault.read.bind(vault);
+    vault.read = async () => {
+      throw new Error('Datei gerade nicht verfügbar');
+    };
+    await index.ensureFresh(false);
+
+    expect(index.noteChunks('Projekt.md', 2000)).toHaveLength(0);
+    expect(await index.search('Pavillonbedarf')).toHaveLength(0);
+
+    vault.read = read;
+    await index.ensureFresh(false);
+    expect(index.noteChunks('Projekt.md', 2000)).toHaveLength(0);
+  });
+
+  it('bettet alle Vektoren nach einem Embedding-Modellwechsel neu ein', async () => {
+    const vault = new MemoryVault({
+      'Autopflege.md': 'Reifen wechseln, Ölstand prüfen, Bremsen kontrollieren und Waschanlage besuchen.',
+      'Steuer.md': 'Die Umsatzsteuer-Voranmeldung muss quartalsweise übermittelt werden.',
+    });
+    const persist = new MemoryPersist();
+    const firstEmbedder = new FakeEmbedder('fake-embed-v1');
+    const first = new VaultIndex(vault, persist, OPTIONS, firstEmbedder);
+    await first.ensureFresh(true);
+    expect(first.stats().embedded).toBe(first.stats().chunks);
+
+    const nextEmbedder = new FakeEmbedder('fake-embed-v2');
+    const next = new VaultIndex(vault, persist, OPTIONS, nextEmbedder);
+    const stats = await next.ensureFresh(false);
+
+    expect(stats.embeddingModel).toBe('fake-embed-v2');
+    expect(stats.embedded).toBe(stats.chunks);
+    expect(nextEmbedder.embeddedTexts).toHaveLength(stats.chunks);
+    const sources = await next.search('Reifen wechseln Ölstand', { topK: 2 });
+    expect(sources[0].path).toBe('Autopflege.md');
+    expect(sources[0].viaVector).toBe(true);
+  });
+
+  it('speichert und verwendet das tatsächlich aufgelöste Ollama-Embedding-Modell', async () => {
+    const vault = new MemoryVault({
+      'Wissen.md': '# Wissen\n\nInhalt über erneuerbare Energien und Photovoltaik.',
+      'Arbeit.md': '# Arbeit\n\nProjektplanung und Kundenkommunikation.',
+    });
+    const settings = { useEmbeddings: true, embedModel: 'nomic-embed-text' };
+    let installedModel = 'qwen3-embedding:latest';
+    const provider = {
+      findEmbedModel: vi.fn(async (_candidates: string[]) => installedModel),
+      embed: vi.fn(async (_model: string, texts: string[]) => texts.map(() => [1, 0, 0])),
+    };
+    const embedder = new OllamaEmbedder(provider as unknown as OllamaProvider, () => settings);
+    const index = new VaultIndex(vault, new MemoryPersist(), OPTIONS, embedder);
+
+    const first = await index.ensureFresh(true);
+    expect(first.embeddingModel).toBe('qwen3-embedding:latest');
+    expect(first.embedded).toBe(first.chunks);
+    expect(provider.embed).toHaveBeenCalledWith('qwen3-embedding:latest', expect.any(Array), undefined);
+    expect(provider.findEmbedModel.mock.calls[0][0]).not.toContain('qwen3.6:27b');
+
+    settings.embedModel = 'bge-m3';
+    installedModel = 'bge-m3:latest';
+    const changed = await index.ensureFresh(false);
+    expect(changed.embeddingModel).toBe('bge-m3:latest');
+    expect(changed.embedded).toBe(changed.chunks);
+    expect(provider.embed).toHaveBeenCalledWith('bge-m3:latest', expect.any(Array), undefined);
+  });
+
+  it('versucht die Modellsuche nach vorübergehender Unerreichbarkeit erneut', async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = {
+        findEmbedModel: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce('nomic-embed-text:latest'),
+        embed: vi.fn(),
+      };
+      const embedder = new OllamaEmbedder(provider as unknown as OllamaProvider, () => ({ useEmbeddings: true, embedModel: 'nomic-embed-text' }));
+
+      await expect(embedder.resolveModel()).resolves.toBeNull();
+      expect(embedder.modelName()).toBeNull();
+      await expect(embedder.resolveModel()).resolves.toBeNull();
+      expect(provider.findEmbedModel).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      await expect(embedder.resolveModel()).resolves.toBe('nomic-embed-text:latest');
+      expect(embedder.modelName()).toBe('nomic-embed-text:latest');
+      expect(provider.findEmbedModel).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('behält ein aufgelöstes Modell nach einem vorübergehenden Embedding-Fehler', async () => {
+    const provider = {
+      findEmbedModel: vi.fn().mockResolvedValue('nomic-embed-text:latest'),
+      embed: vi.fn()
+        .mockRejectedValueOnce(new Error('Ollama momentan nicht erreichbar'))
+        .mockResolvedValueOnce([[0.1, 0.2]]),
+    };
+    const embedder = new OllamaEmbedder(provider as unknown as OllamaProvider, () => ({ useEmbeddings: true, embedModel: 'nomic-embed-text' }));
+
+    await expect(embedder.embed(['Text'])).resolves.toBeNull();
+    await expect(embedder.embed(['Text'])).resolves.toEqual([[0.1, 0.2]]);
+    expect(provider.findEmbedModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('versucht fehlgeschlagene Embeddings beim nächsten Indexlauf erneut', async () => {
+    const vault = new MemoryVault({ 'Wissen.md': '# Wissen\n\nInhalt über erneuerbare Energien und Photovoltaik.' });
+    const embedder = new FakeEmbedder('fake-embed');
+    embedder.failNext = true;
+    const { index } = buildIndex(vault, embedder);
+
+    const first = await index.ensureFresh(true);
+    expect(first.embedded).toBe(0);
+    expect(first.embeddingModel).toBe('fake-embed');
+
+    const retried = await index.ensureFresh(false);
+    expect(retried.embedded).toBe(retried.chunks);
   });
 
   it('findet über Vektoren auch ohne wörtliche Übereinstimmung', async () => {

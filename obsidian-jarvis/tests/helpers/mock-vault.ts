@@ -68,13 +68,25 @@ export class MemoryPersist implements IndexPersist {
 /** Deterministischer Ersatz für ein Embedding-Modell.
  *  Vektoren entstehen aus Wort-Hashes - ähnliche Texte liegen dadurch näher beieinander. */
 export class FakeEmbedder implements Embedder {
+  readonly embeddedTexts: string[] = [];
+  failNext = false;
+
   constructor(private model: string | null = 'fake-embed') {}
 
   modelName(): string | null {
     return this.model;
   }
 
+  setModel(model: string | null): void {
+    this.model = model;
+  }
+
   async embed(texts: string[]): Promise<number[][] | null> {
+    this.embeddedTexts.push(...texts);
+    if (this.failNext) {
+      this.failNext = false;
+      return null;
+    }
     if (!this.model) return null;
     return texts.map((text) => {
       const vector = new Array(64).fill(0);

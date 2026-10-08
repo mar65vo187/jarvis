@@ -238,55 +238,96 @@ export class ObsidianMemoryNoteFs implements MemoryNoteFs {
   }
 }
 
+/** Bekannte Ollama-Embedding-Modelle als Rückfall, wenn das Wunschmodell fehlt. */
+export const OLLAMA_EMBED_MODEL_FALLBACKS = [
+  'nomic-embed-text',
+  'qwen3-embedding',
+  'embeddinggemma',
+  'mxbai-embed-large',
+  'bge-m3',
+];
+
 /** Embeddings über das lokale Ollama-Modell. Fällt still aus, wenn keines läuft. */
 export class OllamaEmbedder implements Embedder {
-  private broken = false;
-  private resolved: string | null = null;
+  private resolvedKey: string | null = null;
+  private resolvedModel: string | null = null;
+  private resolvedAt = 0;
+  private resolving: { key: string; promise: Promise<string | null> } | null = null;
+  private readonly missingRetryMs = 30_000;
 
   constructor(
     private provider: OllamaProvider,
-    private settings: () => { useEmbeddings: boolean; embedModel: string; preferred: string[] },
+    private settings: () => { useEmbeddings: boolean; embedModel: string },
   ) {}
 
-  modelName(): string | null {
-    if (this.broken) return null;
-    const settings = this.settings();
-    if (!settings.useEmbeddings) return null;
-    return this.resolved ?? (settings.embedModel || null);
+  private settingsKey(settings = this.settings()): string {
+    return JSON.stringify([settings.useEmbeddings, settings.embedModel.trim()]);
   }
 
-  /** Beim Start prüfen, welches Embedding-Modell wirklich installiert ist. */
-  async resolve(): Promise<string | null> {
-    if (this.broken) return null;
+  modelName(): string | null {
     const settings = this.settings();
     if (!settings.useEmbeddings) return null;
-    if (this.resolved) return this.resolved;
-    const candidates = [
-      settings.embedModel,
-      'nomic-embed-text',
-      'qwen3-embedding',
-      'embeddinggemma',
-      'mxbai-embed-large',
-      'bge-m3',
-      ...settings.preferred,
-    ].filter(Boolean);
-    const found = await this.provider.findEmbedModel(candidates);
-    if (found) this.resolved = found;
-    else this.broken = true;
-    return this.resolved;
+    const key = this.settingsKey(settings);
+    return this.resolvedKey === key ? this.resolvedModel : null;
+  }
+
+  /** Vor dem Indexlauf das tatsächlich installierte Modell auflösen. */
+  async resolveModel(): Promise<string | null> {
+    while (true) {
+      const settings = this.settings();
+      const key = this.settingsKey(settings);
+      if (!settings.useEmbeddings) {
+        this.resolvedKey = key;
+        this.resolvedModel = null;
+        this.resolvedAt = Date.now();
+        return null;
+      }
+
+      if (this.resolvedKey === key &&
+          (this.resolvedModel !== null || Date.now() - this.resolvedAt < this.missingRetryMs)) {
+        return this.resolvedModel;
+      }
+
+      let pending = this.resolving?.key === key ? this.resolving.promise : null;
+      if (!pending) {
+        const candidates = [...new Set([settings.embedModel.trim(), ...OLLAMA_EMBED_MODEL_FALLBACKS].filter(Boolean))];
+        let promise: Promise<string | null>;
+        promise = Promise.resolve()
+          .then(() => this.provider.findEmbedModel(candidates))
+          .catch(() => null)
+          .then((found) => {
+            // A stale lookup must not overwrite a result for newer settings.
+            if (this.resolving?.key === key && this.resolving.promise === promise) {
+              this.resolvedKey = key;
+              this.resolvedModel = found;
+              this.resolvedAt = Date.now();
+            }
+            return found;
+          });
+        this.resolving = { key, promise };
+        pending = promise;
+      }
+
+      try {
+        await pending;
+      } finally {
+        if (this.resolving?.promise === pending) this.resolving = null;
+      }
+      const latest = this.settings();
+      if (this.settingsKey(latest) !== key) continue;
+      if (this.resolvedKey === key) return this.resolvedModel;
+      // Settings may have changed away and back while a previous lookup was in flight.
+      // Loop once more so the current configuration always gets a cached resolution.
+    }
   }
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][] | null> {
-    const model = (await this.resolve()) ?? this.modelName();
+    const model = await this.resolveModel();
     if (!model) return null;
     try {
-      const vectors = await this.provider.embed(model, texts, signal);
-      if (!vectors) {
-        this.broken = true;
-        return null;
-      }
-      return vectors;
+      return await this.provider.embed(model, texts, signal);
     } catch {
+      // Keep the model resolution so a transient request failure can recover on retry.
       return null;
     }
   }

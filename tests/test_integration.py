@@ -11,6 +11,7 @@ from unittest.mock import patch
 import test_jarvis
 import httpx
 from jarvis import brain, claude, config, db, guard, huggingface, main, web, xkiro
+from jarvis.errors import CloudConfigError
 
 REAL_CLIENT = httpx.AsyncClient
 
@@ -341,6 +342,15 @@ class Integration(unittest.TestCase):
         self.assertEqual(out['message']['content'], 'HF bereit.')
 
 
+    def test_huggingface_rejects_bad_credentials_as_setup_error(self):
+        os.environ.update(JARVIS_PROVIDER='huggingface', JARVIS_CLOUD_ENABLED='1',
+                          HF_TOKEN='invalid-token', HF_MODEL='openai/test-model')
+        config.reload()
+
+        with self.fake_hf_api(lambda req: httpx.Response(401, json={'error': 'invalid token'})):
+            with self.assertRaisesRegex(CloudConfigError, 'ungültig'):
+                asyncio.run(huggingface.call([{'role': 'user', 'content': 'Hallo'}]))
+
     def test_auto_runtime_failover_xkiro_to_huggingface(self):
         os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
                           XKIRO_API_KEY='x', HF_TOKEN='hf_x')
@@ -357,6 +367,25 @@ class Integration(unittest.TestCase):
         self.assertEqual(out['message']['content'], 'HF fallback bereit.')
         self.assertEqual(brain.LAST_PROVIDER['provider'], 'huggingface')
         self.assertEqual(brain.LAST_PROVIDER['model'], config.HF_MODEL)
+
+    def test_auto_does_not_hide_provider_setup_errors_with_fallback(self):
+        os.environ.update(JARVIS_PROVIDER='auto', JARVIS_CLOUD_ENABLED='1',
+                          XKIRO_API_KEY='invalid', HF_TOKEN='hf_x')
+        config.reload()
+        fallback_calls = []
+
+        async def x_invalid(*args, **kwargs):
+            raise CloudConfigError('xKiro-Zugang ungültig.')
+
+        async def hf_ok(*args, **kwargs):
+            fallback_calls.append('huggingface')
+            return {'message': {'content': 'unerwarteter Fallback', 'tool_calls': []}}
+
+        with patch.object(xkiro, 'call', new=x_invalid), patch.object(huggingface, 'call', new=hf_ok):
+            with self.assertRaisesRegex(CloudConfigError, 'Zugang ungültig'):
+                asyncio.run(brain._call([{'role': 'user', 'content': 'Hallo'}], max_tokens=50))
+        self.assertEqual(fallback_calls, [])
+        self.assertEqual(brain.LAST_PROVIDER['provider'], 'xkiro')
 
 if __name__ == '__main__':
     unittest.main()

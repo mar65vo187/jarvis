@@ -45,6 +45,9 @@ export class LearningStore {
   private updatedAt = 0;
   private loaded = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveWaiters: Array<() => void> = [];
+  private dirty = false;
+  private flushing: Promise<void> | null = null;
 
   constructor(
     private persist: JsonPersist,
@@ -95,27 +98,57 @@ export class LearningStore {
 
   /** Speichern (leicht verzögert, damit viele Änderungen nicht viele Schreibvorgänge kosten). */
   private async save(delayMs = 250): Promise<void> {
+    this.dirty = true;
     const delay = this.saveDelayMs > 0 ? Math.min(delayMs, this.saveDelayMs) : 0;
-    if (this.saveTimer) clearTimeout(this.saveTimer);
     if (delay <= 0) {
-      await this.persistNow();
+      await this.flush();
       return;
     }
-    await new Promise<void>((resolve) => {
-      this.saveTimer = setTimeout(() => {
-        this.saveTimer = null;
-        void this.persistNow().then(resolve);
-      }, delay);
-    });
+
+    const completion = new Promise<void>((resolve) => this.saveWaiters.push(resolve));
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      void this.flush().catch(() => undefined);
+    }, delay);
+    await completion;
   }
 
-  /** Sofort speichern — für Momente, in denen nichts verloren gehen darf. */
+  /** Sofort speichern — bündelt alle wartenden Änderungen und schließt alle Schreiber ab. */
   async flush(): Promise<void> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    await this.persistNow();
+    this.dirty = true;
+
+    if (this.flushing) {
+      await this.flushing;
+      if (this.dirty) await this.flush();
+      return;
+    }
+
+    const flushing = (async () => {
+      try {
+        while (this.dirty) {
+          if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+          }
+          this.dirty = false;
+          await this.persistNow();
+        }
+      } finally {
+        const waiters = this.saveWaiters.splice(0);
+        waiters.forEach((resolve) => resolve());
+      }
+    })();
+    this.flushing = flushing;
+    try {
+      await flushing;
+    } finally {
+      if (this.flushing === flushing) this.flushing = null;
+    }
   }
 
   // ------------------------------------------------------------- Lektionen
@@ -230,7 +263,7 @@ export class LearningStore {
   search(query: string, limit = 3): Lesson[] {
     const queryTerms = new Set(tokenize(query));
     if (!queryTerms.size || !this.lessons.length) return [];
-    const scored = this.lessons.map((lesson) => {
+    const scored = this.lessons.filter((lesson) => lesson.rating !== 'bad').map((lesson) => {
       const lessonTerms = new Set(lesson.terms);
       let overlap = 0;
       for (const term of queryTerms) {

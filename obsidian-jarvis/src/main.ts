@@ -13,6 +13,7 @@ import {
   ObsidianVaultFileSystem,
   ObsidianVaultReader,
   OllamaEmbedder,
+  OLLAMA_EMBED_MODEL_FALLBACKS,
   PluginIndexPersist,
   desktopNodeRequire,
   nodeCommandRunner,
@@ -81,7 +82,6 @@ export default class JarvisPlugin extends Plugin {
     const embedder = new OllamaEmbedder(ollama, () => ({
       useEmbeddings: this.settings.local.useEmbeddings,
       embedModel: this.settings.local.embedModel,
-      preferred: this.settings.local.preferred,
     }));
 
     this.index = new VaultIndex(
@@ -1342,7 +1342,7 @@ export default class JarvisPlugin extends Plugin {
         lines.push(`⚠️ Eingestelltes Modell "${model}" ist nicht installiert. Vorschlag: ${models.slice(0, 3).join(', ') || 'keines'}`);
       }
       if (this.settings.local.useEmbeddings) {
-        const embed = await ollama.findEmbedModel([this.settings.local.embedModel, 'nomic-embed-text', 'qwen3-embedding', 'embeddinggemma']);
+        const embed = await ollama.findEmbedModel([this.settings.local.embedModel, ...OLLAMA_EMBED_MODEL_FALLBACKS]);
         lines.push(embed ? `✅ Embedding-Modell: ${embed}` : `⚠️ Kein Embedding-Modell gefunden (ollama pull nomic-embed-text). Suche läuft dann über Stichworte.`);
       }
     }

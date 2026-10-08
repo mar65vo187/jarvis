@@ -378,9 +378,15 @@ async def publish_page(slug: str, html: str, **_):
 
 async def remember(topic: str, content: str, privat: bool = True, **_):
     from . import privacy
-    stored = privacy.encrypt(content) if privat else content
+    if not privat:
+        findings = privacy.sensitive_findings(f"{topic}\n{content}")
+        if findings:
+            return ("BLOCKIERT: öffentliche Gedächtniseinträge dürfen keine persönlichen Angaben enthalten (" +
+                    ", ".join(findings) + "). Nutze privat=true.")
+    stored_topic = privacy.encrypt(topic) if privat else topic
+    stored_content = privacy.encrypt(content) if privat else content
     i = db.ex("INSERT INTO memory(topic,content,ts,private) VALUES(?,?,?,?)",
-              (topic, stored, db.now(), 1 if privat else 0))
+              (stored_topic, stored_content, db.now(), 1 if privat else 0))
     return f"Gemerkt (#{i}, {'privat/verschlüsselt' if privat else 'öffentlich'})."
 
 
@@ -389,9 +395,10 @@ async def recall(query: str, **_):
     words = [w for w in re.split(r"\W+", query.lower()) if len(w) > 2][:6] or [query.lower()]
     out = []
     for r in db.q("SELECT * FROM memory ORDER BY id DESC LIMIT 2000"):
+        topic = privacy.decrypt(r["topic"])
         text = privacy.decrypt(r["content"])
-        if any(w in (text + " " + r["topic"]).lower() for w in words):
-            out.append(f"#{r['id']} [{r['topic']}] {text}")
+        if any(w in (text + " " + topic).lower() for w in words):
+            out.append(f"#{r['id']} [{topic}] {text}")
             if len(out) >= 30:
                 break
     return "\n".join(out) or "Nichts gefunden."
