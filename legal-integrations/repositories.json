@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "purpose": "Staged integration registry for German-law research and contract drafting in Jarvis",
+  "repositories": [
+    {
+      "id": "bundesrecht",
+      "url": "https://github.com/Gesetze-fuer-KI/bundesrecht",
+      "role": "official-federal-law corpus candidate",
+      "license_status": "unconfirmed-no-root-LICENSE-found",
+      "mode": "source-only",
+      "enabled": false,
+      "reason": "Confirm redistribution/licensing terms before copying corpus"
+    },
+    {
+      "id": "primamcp",
+      "url": "https://github.com/PLANIT-TECH/primamcp",
+      "role": "German and EU law MCP service",
+      "license_status": "MIT-repo-wrapper-and-docs-managed-service-not-open-source",
+      "mode": "remote-mcp-opt-in",
+      "enabled": false,
+      "reason": "Requires provider setup; review pricing, auth and privacy before use"
+    },
+    {
+      "id": "de-eli-mcp",
+      "url": "https://github.com/matematicsolutions/de-eli-mcp",
+      "role": "law and case-law MCP with ELI/ECLI citations",
+      "license_status": "Apache-2.0",
+      "mode": "local-mcp-opt-in",
+      "enabled": false,
+      "reason": "Install dependencies and run source/privacy smoke tests before enabling"
+    },
+    {
+      "id": "claude-fuer-deutsches-recht",
+      "url": "https://github.com/Klotzkette/claude-fuer-deutsches-recht",
+      "role": "German contract and AGB skills",
+      "license_status": "Apache-2.0",
+      "mode": "selective-skill-import",
+      "enabled": false,
+      "reason": "Large repository; review and import only needed skill files"
+    },
+    {
+      "id": "ai-skills-german-law",
+      "url": "https://github.com/borghei/AI-Skills-German-Law",
+      "role": "German/EU legal skills and compliance",
+      "license_status": "Apache-2.0 OR MIT",
+      "mode": "selective-skill-import",
+      "enabled": false,
+      "reason": "Verify each skill against primary sources and verification log"
+    },
+    {
+      "id": "legal-audit-de",
+      "url": "https://github.com/FutureRootsDE/legal-audit-de",
+      "role": "German/EU code and document compliance audit",
+      "license_status": "MIT",
+      "mode": "optional-audit-plugin",
+      "enabled": false,
+      "reason": "Review command permissions and browser/network behavior before installation"
+    },
+    {
+      "id": "claude-for-legal",
+      "url": "https://github.com/anthropics/claude-for-legal",
+      "role": "general legal workflow methods",
+      "license_status": "Apache-2.0",
+      "mode": "methodology-only",
+      "enabled": false,
+      "reason": "Adapt workflows to German law; do not reuse US legal conclusions"
+    },
+    {
+      "id": "legalrabbit-docx-mcp",
+      "url": "https://github.com/LegalRabbit-AI/legalrabbit-docx-mcp",
+      "role": "local DOCX read/edit/comment workflow",
+      "license_status": "MIT",
+      "mode": "local-mcp-opt-in",
+      "enabled": false,
+      "reason": "Review filesystem permissions and test only on copies of synthetic documents"
+    }
+  ],
+  "safety_gates": [
+    "Never commit secrets or real client documents",
+    "No remote transfer of confidential/personal contract data without explicit approval",
+    "Require source URL and citation for each legal proposition",
+    "Mark missing/stale/conflicting sources unresolved",
+    "Generated legal documents require qualified human review",
+    "Never overwrite source DOCX without explicit approval"
+  ]
+}

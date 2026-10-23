@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "de-eli-mcp": {
+      "command": "uvx",
+      "args": ["de-eli-mcp"]
+    }
+  }
+}
